@@ -2,7 +2,7 @@
 
 2次元粒子要素法（Particle Element Method）による離散要素法シミュレーションプログラムです。粒子間の接触・衝突現象をHertz接触理論に基づいて数値計算します。
 
-![PEM Animation](pem_animation.gif)
+![PEM Animation](src/pem_animation.gif)
 
 ## 🔬 主な機能
 
@@ -12,15 +12,28 @@
 - **セル格子システム**: 効率的な近傍探索アルゴリズム
 - **エネルギー保存チェック**: 数値計算の精度検証機能
 
+## ディレクトリ構造
+
+PEM/
+├── src/
+│ └── pem_simulator.f90 # メインプログラム（Fortran90）
+├── data/ # シミュレーション結果出力
+├── reference/ # 参考資料・理論値
+├── pem_animation.gif # シミュレーション結果のアニメーション
+└── README.md # このファイル
+
 ## 🚀 使用方法
 
 ### コンパイル
 ```bash
-# Fortranコンパイラを使用（gfortran推奨）
-gfortran -o pem_simulator src/pem_simulator.f90
+# ディレクトリの移動
+cd PEM/src
+
+# Fortranコンパイラを使用
+ifort pem_simulator.f90 -o pem_simulator
 
 # または最適化オプション付き
-gfortran -O3 -o pem_simulator src/pem_simulator.f90
+ifort -O3 -o pem_simulator src/pem_simulator.f90
 ```
 
 ### 実行
@@ -28,7 +41,8 @@ gfortran -O3 -o pem_simulator src/pem_simulator.f90
 # シミュレーション実行
 ./pem_simulator
 
-# 出力ファイルは data/ フォルダに保存されます
+# animate_pem.pyを用いてアニメーション化
+python3 animate_pem.py
 ```
 
 ## ⚙️ シミュレーションパラメータ
@@ -80,16 +94,7 @@ gfortran -O3 -o pem_simulator src/pem_simulator.f90
 
 1. **運動量保存**: 衝突前後の運動量比較
 2. **エネルギー保存**: 運動エネルギーの保存確認
-3. **理論値との比較**: 解析解との誤差評価
-
-### 使用例
-```bash
-# 検証モードで実行
-./pem_simulator
-
-# 結果確認
-echo "理論値との比較結果を確認してください"
-```
+3. **理論値との比較**: 衝突前後の粒子速度について、解析解との誤差評価
 
 ## 🛠️ プログラム構造
 
@@ -107,11 +112,10 @@ echo "理論値との比較結果を確認してください"
 - `nposit_sub`: 位置・速度更新
 - `actf_sub`: 接触力計算
 
-## 📋 必要要件
+## 📋 計算環境
 
-- **Fortran90対応コンパイラ** (gfortran, ifort等)
-- **メモリ**: 最低512MB推奨
-- **OS**: Linux, macOS, Windows (WSL)
+京大のスパコン Camphor を使用。
+
 
 ## 🔧 カスタマイズ
 
@@ -128,6 +132,10 @@ real(8), parameter :: dt = 5.0d-7
 ! 材料物性変更
 real(8), parameter :: young_modulus = 2.0d11
 real(8), parameter :: poisson_ratio = 0.3d0
+
+! 検証モードの切り替え
+logical :: validation_mode = .false. ! 検証モードオフ
+
 ```
 
 ## 📚 参考文献
