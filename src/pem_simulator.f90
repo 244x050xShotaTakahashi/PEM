@@ -1,0 +1,1090 @@
+! メインプログラムおよびモジュール: 2次元粒子要素法 (球体モデル)
+! 提供されたPDFのi-pem.fに基づく。
+
+! モジュール: シミュレーション定数 (配列サイズ、数学定数)
+module simulation_constants_mod
+    implicit none
+    integer, parameter :: ni_max = 1000  ! ni: 最大粒子数
+    integer, parameter :: nj_max = 13    ! nj: 粒子ごとの最大接触点数 (粒子間10 + 壁3)
+    integer, parameter :: nc_max = 20000 ! nc: グリッド内の最大セル数
+    real(8), parameter :: PI_VAL = 3.141592653589793d0 ! pi: 円周率
+    real(8), parameter :: GRAVITY_ACCEL = 9.80665d0    ! g: 重力加速度
+end module simulation_constants_mod
+
+! モジュール: シミュレーション制御パラメータと材料物性値
+module simulation_parameters_mod
+    use simulation_constants_mod, only: ni_max
+    implicit none
+
+    real(8) :: time_step = 5.0d-7                 ! dt: 時間刻み (検証のためより小さく)
+    real(8) :: friction_coeff_particle = 0.25d0   ! fri: 粒子間摩擦係数
+    real(8) :: friction_coeff_wall     = 0.17d0   ! frw: 壁-粒子間摩擦係数
+    real(8) :: young_modulus_particle = 4.9d9     ! e: 粒子のヤング率
+    real(8) :: young_modulus_wall = 3.9d9         ! ew: 壁のヤング率
+    real(8) :: poisson_ratio_particle = 0.23d0    ! po: 粒子のポアソン比
+    real(8) :: poisson_ratio_wall = 0.25d0        ! pow: 壁のポアソン比
+    real(8) :: shear_to_normal_stiffness_ratio    ! so: せん断弾性係数と法線方向弾性係数の比 (G/E関連)
+    real(8) :: particle_density = 2.48d3         ! de: 粒子の密度
+
+    logical :: validation_mode = .true.
+
+    save ! これらの値が初期化され、保持されることを保証
+end module simulation_parameters_mod
+
+! モジュール: 粒子固有データ (物理特性、運動学、力)
+module particle_data_mod
+    use simulation_constants_mod, only: ni_max, nj_max
+    implicit none
+
+    ! 物理特性
+    real(8), dimension(ni_max) :: radius         ! rr(ni): 粒子半径
+    real(8), dimension(ni_max) :: mass           ! wei(ni): 粒子質量
+    real(8), dimension(ni_max) :: moment_inertia ! pmi(ni): 粒子の慣性モーメント
+
+    ! 位置と向き
+    real(8), dimension(ni_max) :: x_coord        ! x0(ni): 粒子中心のx座標
+    real(8), dimension(ni_max) :: z_coord        ! z0(ni): 粒子中心のz座標 (原文ではy、コードではz)
+    real(8), dimension(ni_max) :: rotation_angle ! qq(ni): 粒子の回転変位 (角度)
+
+    ! 速度 (並進および回転)
+    real(8), dimension(ni_max) :: x_vel          ! u0(ni): 粒子のx方向速度
+    real(8), dimension(ni_max) :: z_vel          ! v0(ni): 粒子のz方向速度
+    real(8), dimension(ni_max) :: rotation_vel   ! f0(ni): 粒子の回転速度
+
+    ! 合力とモーメント
+    real(8), dimension(ni_max) :: x_force_sum    ! xf(ni): 粒子に働くx方向の合力
+    real(8), dimension(ni_max) :: z_force_sum    ! zf(ni): 粒子に働くz方向の合力
+    real(8), dimension(ni_max) :: moment_sum     ! mf(ni): 粒子に働くモーメント
+
+    ! 接触力の成分と接触相手のインデックス
+    real(8), dimension(ni_max, nj_max) :: normal_force_contact  ! en(ni,nj): 法線方向接触力
+    real(8), dimension(ni_max, nj_max) :: shear_force_contact   ! es(ni,nj): せん断方向接触力
+    integer, dimension(ni_max, nj_max) :: contact_partner_idx ! je(ni,nj): 接触点番号配列 (接触している粒子/壁のインデックスを格納)
+
+    ! 現時間ステップにおける増分変位 (common/dpm/ より)
+    real(8), dimension(ni_max) :: x_disp_incr    ! u(ni): x方向変位増分
+    real(8), dimension(ni_max) :: z_disp_incr    ! v(ni): z方向変位増分
+    real(8), dimension(ni_max) :: rot_disp_incr  ! f(ni): 回転変位増分
+    
+    save
+end module particle_data_mod
+
+! モジュール: セル格子システムデータ
+module cell_system_mod
+    use simulation_constants_mod, only: ni_max, nc_max
+    implicit none
+
+    integer :: num_particles          ! n: 粒子数
+    integer :: cells_x_dir            ! idx: x方向のセル数
+    integer :: cells_z_dir            ! idz: z方向のセル数 (使用状況から推測)
+    integer :: particle_gen_layers    ! ipz: 初期粒子生成層数
+
+    real(8) :: container_width        ! w: 容器の幅
+    real(8) :: cell_size              ! c: セルの幅/サイズ
+
+    ! 各セルに属する粒子を連結リストで保持する（セル先頭 index → next → ...）
+    integer, dimension(nc_max) :: cell_head        ! そのセルで最初に登録された粒子インデックス (空=0)
+    integer, dimension(ni_max) :: particle_cell_next ! 次の粒子インデックス (0 ならリスト終端)
+
+    ! 後方互換用に「最後に登録された粒子」を保持（デバッグ用途）
+    integer, dimension(nc_max) :: cell_particle_map
+
+    integer, dimension(ni_max) :: particle_cell_idx ! 粒子iが格納されているセル番号
+
+    save
+end module cell_system_mod
+
+! メインプログラム
+program two_dimensional_pem
+    use simulation_constants_mod
+    use simulation_parameters_mod
+    use particle_data_mod
+    use cell_system_mod
+    implicit none
+
+    integer, parameter :: MAX_STEPS = 2000000      ! 最大計算ステップ数
+    integer :: it_step, static_judge_flag          ! static_judge_flag: 静止判定フラグ
+    integer :: i ! ループカウンタ用にiを宣言
+    real(8) :: current_time                        ! 現在時刻
+    real(8) :: rmax_particle_radius                ! fpositから返される最大粒子半径
+    
+    ! --- ▼ 1D 衝突検証用追加変数 ▼ ---
+    logical :: collision_started = .false.  ! 衝突が開始したか
+    logical :: collision_finished = .false. ! 衝突が終了したか
+    real(8) :: initial_v1, initial_v2        ! 衝突前速度
+    real(8) :: final_v1, final_v2            ! 衝突後速度
+    real(8) :: dist, sumr                    ! 接触判定用
+    real(8) :: m1, m2, e_coeff, v1_theo, v2_theo, err1, err2 ! 評価用
+    real(8) :: ke_initial, ke_final, ke_theo ! エネルギー保存チェック用
+
+    ! 初期位置と初期条件の設定
+    call fposit_sub(rmax_particle_radius)
+    call inmat_sub
+    call init_sub
+
+    ! -----------------------------------------------
+    ! 検証モードの場合：初期水平速度と摩擦係数を設定
+    ! -----------------------------------------------
+    if (validation_mode) then
+        ! 粒子1に 20 m/s、粒子2は静止
+        x_vel(1) = 20.0d0
+        x_vel(2) = 0.0d0
+        z_vel(1) = 0.0d0
+        z_vel(2) = 0.0d0
+
+        ! 理論値計算用の初期速度保存
+        initial_v1 = x_vel(1)
+        initial_v2 = x_vel(2)
+
+        ! 摩擦を無効化
+        friction_coeff_particle = 0.0d0
+        friction_coeff_wall     = 0.0d0
+    end if
+
+    current_time = 0.0d0
+
+    ! 各ステップの繰り返し計算
+    do it_step = 1, MAX_STEPS
+        current_time = current_time + time_step
+
+        ! 粒子をセルに格納
+        call ncel_sub
+
+        ! 全粒子の合力をクリア
+        do i = 1, num_particles
+            x_force_sum(i) = 0.0d0
+            z_force_sum(i) = 0.0d0
+            moment_sum(i) = 0.0d0
+        end do
+        
+        do i = 1, num_particles
+            ! 粒子と壁との接触力計算
+            call wcont_sub(i)
+            ! 粒子間の接触力計算
+            call pcont_sub(i, rmax_particle_radius)
+        end do
+
+        ! 増分変位の重ね合わせ (運動方程式の積分)
+        call nposit_sub(static_judge_flag)
+
+        ! === ▼ 1D 衝突検証ロジック ▼ ===
+        if (validation_mode .and. .not. collision_finished) then
+            dist = dabs(x_coord(1) - x_coord(2))
+            sumr = radius(1) + radius(2)
+
+            ! 衝突開始判定
+            if (.not. collision_started .and. dist < sumr) then
+                collision_started = .true.
+                write(*,*) '衝突開始: 時刻 = ', current_time
+                write(*,*) '衝突前速度: v1 = ', x_vel(1), ' v2 = ', x_vel(2)
+            end if
+
+            ! 衝突終了判定: 一度接触後、再び離れた
+            if (collision_started .and. dist > sumr + 1.0d-6) then
+                collision_finished = .true.
+
+                final_v1 = x_vel(1)
+                final_v2 = x_vel(2)
+
+                ! 正確な質量を使った理論計算 (完全弾性衝突)
+                m1 = mass(1)
+                m2 = mass(2)
+                e_coeff = 1.0d0  ! 完全弾性衝突
+
+                ! 運動量保存とエネルギー保存から導出される公式
+                v1_theo = ((m1 - e_coeff*m2)*initial_v1 + (1.0d0+e_coeff)*m2*initial_v2)/(m1 + m2)
+                v2_theo = ((1.0d0+e_coeff)*m1*initial_v1 + (m2 - e_coeff*m1)*initial_v2)/(m1 + m2)
+
+                ! 同質量の場合の簡単チェック
+                if (dabs(m1 - m2) < 1.0d-12) then
+                    ! 同質量・完全弾性衝突では速度が交換される
+                    v1_theo = initial_v2
+                    v2_theo = initial_v1
+                end if
+
+                ! 相対誤差計算
+                if (dabs(v1_theo) > 1.0d-12) then
+                    err1 = dabs((final_v1 - v1_theo)/v1_theo) * 100.0d0
+                else
+                    err1 = dabs(final_v1 - v1_theo) * 100.0d0
+                end if
+                if (dabs(v2_theo) > 1.0d-12) then
+                    err2 = dabs((final_v2 - v2_theo)/v2_theo) * 100.0d0
+                else
+                    err2 = dabs(final_v2 - v2_theo) * 100.0d0
+                end if
+
+                write(*,*) '================================='
+                write(*,*) '一次元衝突検証結果'
+                write(*,*) '================================='
+                write(*,'(A,ES12.5,A,ES12.5)') '質量: m1 = ', m1, ' m2 = ', m2
+                write(*,'(A,F10.6,A,F10.6)') '初期速度: v1_init = ', initial_v1, ' v2_init = ', initial_v2
+                write(*,'(A,F10.6,A,F10.6)') '理論最終速度: v1_theo = ', v1_theo, ' v2_theo = ', v2_theo
+                write(*,'(A,F10.6,A,F10.6)') '計算最終速度: v1_calc = ', final_v1, ' v2_calc = ', final_v2
+                write(*,'(A,F8.4,A,A,F8.4,A)') '相対誤差: v1誤差 = ', err1, '%', '  v2誤差 = ', err2, '%'
+                
+                ! エネルギー保存チェック
+                ke_initial = 0.5d0 * (m1 * initial_v1**2 + m2 * initial_v2**2)
+                ke_final = 0.5d0 * (m1 * final_v1**2 + m2 * final_v2**2)
+                ke_theo = 0.5d0 * (m1 * v1_theo**2 + m2 * v2_theo**2)
+                write(*,'(A,ES12.5)') '初期運動エネルギー: ', ke_initial
+                write(*,'(A,ES12.5)') '最終運動エネルギー: ', ke_final
+                write(*,'(A,ES12.5)') '理論運動エネルギー: ', ke_theo
+                write(*,'(A,F8.4,A)') 'エネルギー保存誤差: ', dabs((ke_final-ke_initial)/ke_initial)*100.0d0, '%'
+                write(*,*) '================================='
+                ! 衝突検証完了後も計算を続行 (goto 200を削除)
+                goto 200
+            end if
+        end if
+
+        ! 静止状態の判定
+        if (static_judge_flag == 1) then
+            write(*,*) '静止状態に到達しました。時刻: ', current_time
+            goto 200 ! シミュレーションループを抜ける
+        end if
+
+        ! 計算状況の出力
+        if (mod(it_step, 100) == 0) then
+            write(*, '(A,F10.6,A,F12.6,A,F12.6)') 'Time= ', current_time, &
+                                                 ' Z0(N)= ', z_coord(num_particles), &
+                                                 ' V0(N)= ', z_vel(num_particles)
+        end if
+
+        ! グラフィック用データの出力
+        if (validation_mode) then
+            ! 検証モードでは10ステップごとに出力
+            if (it_step == 1 .or. mod(it_step, 10) == 0) then
+                call gfout_sub(it_step, current_time, rmax_particle_radius)
+            end if
+        else
+            ! 通常モードでは50000ステップごとに出力
+            if (it_step == 1 .or. mod(it_step, 50000) == 0) then
+                call gfout_sub(it_step, current_time, rmax_particle_radius)
+            end if
+        end if
+    end do
+
+200 continue ! シミュレーションループ脱出用のラベル
+
+    ! バックアップデータの出力
+    call bfout_sub
+
+    close(10) ! ../data/graph11.d (グラフィックデータファイル1)
+    close(11) ! ../data/graph21.d (グラフィックデータファイル2)
+    close(13) ! ../data/backl.d (バックアップファイル、bfout_subで開かれていれば)
+
+    stop
+contains
+
+    !> 初期粒子配置と構成を設定するサブルーチン
+    subroutine fposit_sub(rmax_out)
+        use simulation_constants_mod, only: ni_max, PI_VAL
+        use simulation_parameters_mod, only: time_step, validation_mode
+        use particle_data_mod, only: radius, x_coord, z_coord, rotation_angle
+        use cell_system_mod ! モジュールからセルシステム関連変数を取得
+        implicit none
+
+        real(8), intent(out) :: rmax_out ! 出力: 最大粒子半径
+
+        integer :: i_layer, j_particle_in_layer, ipx_calc, current_particle_count
+        real(8) :: r1_val, r2_val, rn_val, dx_offset, random_uniform_val
+        integer :: random_seed
+        real(8) :: rmin_val ! 宣言をここに移動
+        integer :: particles_this_row ! 宣言をここに移動
+        
+        ! -------------------------------------------------
+        ! 検証モード: 2 粒子のみを手動配置し通常生成をスキップ
+        ! -------------------------------------------------
+        if (validation_mode) then
+            num_particles = 2
+
+            ! 半径 (同じサイズで理論計算を簡単に)
+            radius(1) = 1.0d0
+            radius(2) = 1.0d0
+
+            ! 位置 (x方向に並べて配置 - 確実に接触するようにより近く)
+            x_coord(1) = 3.0d0
+            z_coord(1) = 3.0d0
+            x_coord(2) = 6.0d0 ! + 2.0d0 * radius(1) - 1.0d-6  ! わずかに重複させて配置
+            z_coord(2) = 3.0d0
+
+            rotation_angle(1) = 0.0d0
+            rotation_angle(2) = 0.0d0
+
+            rmax_out = radius(1)
+            rmin_val = radius(2)
+
+            container_width = 10.0d0  ! 容器幅を広げる
+            cell_size = 1.0d0  ! セルサイズを大きくして両方の粒子を同じセルに配置
+
+            cells_x_dir = idint(container_width / cell_size) + 1
+            cells_z_dir = 5
+
+            if (cells_x_dir * cells_z_dir > nc_max) then
+                write(*,*) 'セル数がnc_maxを超えています (検証モード)'
+                stop 'fposit_sub: セル配列が小さすぎます'
+            end if
+
+            return
+        end if
+
+        ! -------------------------------------------------
+        ! 通常モード: ランダム配置による粒子生成
+        ! -------------------------------------------------
+
+        random_seed = 584287 ! ii の初期値 (乱数シード)
+
+        ! 粒子半径 (元のコードからのサンプル値)
+        r1_val = 1.0d-2  ! 大きな粒子の半径
+        r2_val = 5.0d-3  ! 小さな粒子の半径
+
+        ! 容器の幅と粒子生成層数 (サンプル値)
+        container_width = 5.0d-1      ! w の設定
+        particle_gen_layers = 30      ! ipz の設定
+
+        rmax_out = r1_val             ! 最大半径をr1_valとする
+        rmin_val = r2_val             ! 最小半径をr2_valとする
+
+        rn_val = rmax_out + 1.0d-5    ! パッキングのための有効半径
+        ipx_calc = idint(container_width / (2.0d0 * rn_val)) ! 1行あたりの粒子数 (概算)
+
+        current_particle_count = 0
+        do i_layer = 1, particle_gen_layers
+            if (mod(i_layer, 2) == 0) then  ! 偶数層
+                dx_offset = 2.0d0 * rn_val
+                particles_this_row = ipx_calc - 1
+            else                            ! 奇数層
+                dx_offset = rn_val
+                particles_this_row = ipx_calc
+            end if
+
+            do j_particle_in_layer = 1, particles_this_row
+                call custom_random(random_seed, random_uniform_val)
+                if (random_uniform_val < 2.0d-1) cycle ! 一部の位置をスキップ
+
+                current_particle_count = current_particle_count + 1
+                if (current_particle_count > ni_max) then
+                    write(*,*) '粒子数がni_maxを超えました: ', ni_max
+                    stop 'fposit_sub: 粒子が多すぎます'
+                end if
+                num_particles = current_particle_count ! グローバルな粒子数を更新
+
+                x_coord(num_particles) = 2.0d0 * rn_val * (j_particle_in_layer - 1) + dx_offset
+                z_coord(num_particles) = 2.0d0 * rn_val * (i_layer - 1) + rn_val
+                rotation_angle(num_particles) = 0.0d0 ! 回転角を初期化
+
+                call custom_random(random_seed, random_uniform_val)
+                if (random_uniform_val < 0.5d0) then
+                    radius(num_particles) = r1_val
+                else
+                    radius(num_particles) = r2_val
+                end if
+            end do
+        end do
+        write(*,*) '生成された粒子数: ', num_particles
+
+        ! セルサイズ計算 (原文PDF p.35 eq 3.25: C < sqrt(2)*rmin)
+        if (rmin_val > 0.0d0) then
+             cell_size = rmin_val * 1.30d0 ! または入力から。原文ではrmin*1.35d0はコメントアウト
+        else
+             cell_size = rmax_out * 1.30d0 ! rminが適切に定義されない場合のフォールバック
+        end if
+        if (cell_size <= 0.0d0) then
+            write(*,*) "エラー: fposit_subでcell_sizeが正ではありません。"
+            stop
+        endif
+
+        cells_x_dir = idint(container_width / cell_size) + 1
+        ! cells_z_dirは粒子が到達しうる最大高さをカバーする必要がある
+        ! 元のコード: idz=idint(z0(n)/c)+10。生成時の最上部粒子のz座標を使用。
+        if (num_particles > 0 .and. cell_size > 0.0d0) then
+            cells_z_dir = idint(z_coord(num_particles) / cell_size) + 10 
+        else if (particle_gen_layers > 0 .and. cell_size > 0.0d0 .and. rn_val > 0.0d0) then ! 粒子がない場合でも推定
+             if (particle_gen_layers > 0 .and. rn_val > 0 .and. cell_size > 0) then
+                cells_z_dir = idint( (2.0d0 * rn_val * (real(particle_gen_layers) -1.0d0) + rn_val) / cell_size) + 10
+             else
+                cells_z_dir = 20 ! Fallback if values are still problematic
+             end if
+        else
+            cells_z_dir = 20 ! デフォルト値 (粒子も層もない、またはセルサイズが0の場合)
+        end if
+
+
+        if (cells_x_dir * cells_z_dir > nc_max) then
+            write(*,*) 'ncl (cell_particle_map)がオーバーフローしました!! 要求セル数: ', cells_x_dir * cells_z_dir
+            stop 'fposit_sub: セル配列が小さすぎます'
+        end if
+
+    end subroutine fposit_sub
+
+    !> 材料物性値を初期化し、定数を計算するサブルーチン
+    subroutine inmat_sub
+        use simulation_constants_mod, only: PI_VAL
+        use simulation_parameters_mod, only: time_step, validation_mode
+        use particle_data_mod, only: radius, mass, moment_inertia 
+        use cell_system_mod, only: num_particles 
+        implicit none
+        integer :: i
+        
+        ! time_step, particle_densityなどの値はモジュールsimulation_parameters_modで設定されていると仮定
+        ! 粒子のポアソン比に基づいてせん断弾性係数と法線方向弾性係数の比(so)を計算
+        shear_to_normal_stiffness_ratio = 1.0d0 / (2.0d0 * (1.0d0 + poisson_ratio_particle))
+
+        do i = 1, num_particles
+            ! 質量: 3D球体 V = 4/3 pi r^3。2Dディスク (面積 pi r^2)の場合、deが面密度ならば。
+            ! 元のコードは2Dシミュレーションの文脈でも3D球体の体積で質量を計算しているように見える。
+            mass(i) = (4.0d0 / 3.0d0) * PI_VAL * radius(i)**3 * particle_density
+            
+            ! 慣性モーメント: 3D球体 I = 2/5 m r^2。
+            ! 元のコード: pmi(i)=8.d0/15.d0*de*pi*(rr(i)**5)
+            ! これは (2/5) * (4/3 pi r^3 de) * r^2 = (2/5) * mass * r^2。球体として正しい。
+            moment_inertia(i) = (8.0d0 / 15.0d0) * particle_density * PI_VAL * (radius(i)**5)
+        end do
+    end subroutine inmat_sub
+
+    !> 接触力関連の配列を初期化するサブルーチン
+    subroutine init_sub
+        use simulation_constants_mod, only: nj_max
+        use particle_data_mod
+        use cell_system_mod, only: num_particles
+        implicit none
+        integer :: i, j
+
+        ! 実際の粒子数まで繰り返す
+        if (num_particles > 0) then
+            do i = 1, num_particles 
+                do j = 1, nj_max
+                    normal_force_contact(i, j) = 0.0d0
+                    shear_force_contact(i, j) = 0.0d0
+                    contact_partner_idx(i, j) = 0
+                end do
+            end do
+            ! 増分変位を最初にゼロで初期化
+            x_disp_incr(1:num_particles) = 0.0d0
+            z_disp_incr(1:num_particles) = 0.0d0
+            rot_disp_incr(1:num_particles) = 0.0d0
+        end if
+    end subroutine init_sub
+
+    !> 近傍探索のために粒子をセルに割り当てるサブルーチン
+    subroutine ncel_sub
+        use simulation_constants_mod, only: nc_max
+        use particle_data_mod, only: x_coord, z_coord
+        use cell_system_mod
+        implicit none
+        integer :: i, cell_block_idx
+        integer :: ix_cell, iz_cell ! 宣言をここに移動
+
+        ! 連結リストをクリア
+        if (nc_max > 0) cell_head(1:nc_max) = 0
+        if (nc_max > 0) cell_particle_map(1:nc_max) = 0  ! デバッグ用途
+        if (num_particles > 0) particle_cell_next(1:num_particles) = 0
+
+        do i = 1, num_particles
+            particle_cell_idx(i) = 0 ! 初期化
+            if (cell_size <= 0.0d0) then
+                write(*,*) "エラー: ncel_subでcell_sizeが0または負です。"
+                stop
+            endif
+            if (cells_x_dir <= 0) then
+                 write(*,*) "エラー: ncel_subでcells_x_dirが0または負です。"
+                 stop
+            endif
+
+            ! 粒子iを含むセルの1次元インデックスを計算
+            ix_cell = idint(x_coord(i) / cell_size) ! 座標が負にならないように注意
+            iz_cell = idint(z_coord(i) / cell_size)
+
+            ! インデックスが有効範囲 [0, cells_x_dir-1] および [0, cells_z_dir-1] 内にあることを保証
+            ix_cell = max(0, min(ix_cell, cells_x_dir - 1))
+            iz_cell = max(0, min(iz_cell, cells_z_dir - 1))
+            
+            cell_block_idx = iz_cell * cells_x_dir + ix_cell + 1 ! Fortranの1ベースインデックス
+
+            if (cell_block_idx > 0 .and. cell_block_idx <= nc_max) then
+                 ! 連結リストの先頭に追加
+                 particle_cell_next(i) = cell_head(cell_block_idx)
+                 cell_head(cell_block_idx) = i
+
+                 ! 旧 single-map も更新（最後に登録された粒子）
+                 cell_particle_map(cell_block_idx) = i
+
+                 particle_cell_idx(i) = cell_block_idx
+            else
+                write(*,*) 'エラー: ncel_subで粒子', i, 'のcell_block_idxが範囲外です。'
+                write(*,*) 'x0, z0, c: ', x_coord(i), z_coord(i), cell_size
+                write(*,*) 'ix_cell, iz_cell, idx, computed_block_idx: ', ix_cell, iz_cell, cells_x_dir, cell_block_idx
+                stop 'ncel_sub: 粒子が無効なセルインデックスにマッピングされました'
+            end if
+            
+            ! デバッグ出力 (検証モードの最初の呼び出しのみ)
+            ! if (validation_mode .and. i <= 2) then
+            !     write(*,'(A,I2,A,I5,A,F10.6,A,F10.6)') 'Particle ',i,' -> cell ',cell_block_idx,', pos=(',x_coord(i),',',z_coord(i),')'
+            ! end if
+        end do
+    end subroutine ncel_sub
+
+    !> 粒子iと壁との接触力を計算するサブルーチン
+    subroutine wcont_sub(particle_idx)
+        use simulation_parameters_mod, only: time_step, validation_mode
+        use particle_data_mod
+        use cell_system_mod, only: num_particles, container_width
+        implicit none
+        integer, intent(in) :: particle_idx ! 対象の粒子インデックス
+
+        real(8) :: xi, zi, ri_particle
+        real(8) :: wall_angle_sin, wall_angle_cos, overlap_gap
+        integer :: wall_contact_slot_idx, wall_partner_id
+
+        xi = x_coord(particle_idx)
+        zi = z_coord(particle_idx)
+        ri_particle = radius(particle_idx)
+
+        ! 左壁 (contact_partner_idx = num_particles + 1)
+        wall_contact_slot_idx = 11 ! 元のコードでの左壁用の固定スロット
+        wall_partner_id = num_particles + 1
+        if (xi < ri_particle) then  ! 左壁と接触
+            wall_angle_sin = 0.0d0  ! 法線ベクトル成分 sin(alpha_ij) (粒子中心から壁中心へ向かうベクトル)
+            wall_angle_cos = -1.0d0 ! 法線ベクトル成分 cos(alpha_ij)
+            overlap_gap = ri_particle - xi ! 元のコードでは dabs(xi)、ここでは重なり量を正とする
+            contact_partner_idx(particle_idx, wall_contact_slot_idx) = wall_partner_id
+            if (validation_mode) then
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 1.0d0, 1.0d0)
+            else
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 0.5d0, 0.5d0)
+            end if
+        else                        ! 接触なし
+            normal_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
+            shear_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
+            contact_partner_idx(particle_idx, wall_contact_slot_idx) = 0
+        end if
+
+        ! 下壁 (contact_partner_idx = num_particles + 2)
+        wall_contact_slot_idx = 12 ! 元のコードでの下壁用の固定スロット
+        wall_partner_id = num_particles + 2
+        if (zi < ri_particle) then  ! 下壁と接触
+            wall_angle_sin = -1.0d0
+            wall_angle_cos = 0.0d0
+            overlap_gap = ri_particle - zi 
+            contact_partner_idx(particle_idx, wall_contact_slot_idx) = wall_partner_id
+            if (validation_mode) then
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 1.0d0, 1.0d0)
+            else
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 0.5d0, 0.5d0)
+            end if
+        else                        ! 接触なし
+            normal_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
+            shear_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
+            contact_partner_idx(particle_idx, wall_contact_slot_idx) = 0
+        end if
+
+        ! 右壁 (contact_partner_idx = num_particles + 3)
+        wall_contact_slot_idx = 13 ! 元のコードでの右壁用の固定スロット
+        wall_partner_id = num_particles + 3
+        if (xi + ri_particle > container_width) then ! 右壁と接触
+            wall_angle_sin = 0.0d0
+            wall_angle_cos = 1.0d0
+            overlap_gap = (xi + ri_particle) - container_width 
+            contact_partner_idx(particle_idx, wall_contact_slot_idx) = wall_partner_id
+            if (validation_mode) then
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 1.0d0, 1.0d0)
+            else
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 0.5d0, 0.5d0)
+            end if
+        else                                        ! 接触なし
+            normal_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
+            shear_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
+            contact_partner_idx(particle_idx, wall_contact_slot_idx) = 0
+        end if
+    end subroutine wcont_sub
+
+    !> 粒子iと他の粒子との接触力を計算するサブルーチン
+    subroutine pcont_sub(particle_i_idx, rmax_val)
+        use simulation_constants_mod, only: nj_max
+        use particle_data_mod
+        use cell_system_mod
+        implicit none
+
+        integer, intent(in) :: particle_i_idx     ! 対象の粒子iのインデックス
+        real(8), intent(in) :: rmax_val           ! 最大粒子半径 (探索範囲に使用)
+
+        real(8) :: xi, zi, ri_particle_i
+        real(8) :: xj, zj, rj_particle_j
+        real(8) :: center_dist, overlap_gap
+        real(8) :: contact_angle_sin, contact_angle_cos ! 粒子iから粒子jへの法線ベクトル成分
+        integer :: particle_j_idx                 ! 接触相手の粒子jのインデックス
+        integer :: contact_slot_for_i_j, contact_slot_for_j_i ! 接触リストのスロット
+        integer :: iz_cell_min, iz_cell_max, ix_cell_min, ix_cell_max ! セル探索範囲
+        integer :: current_iz_cell, current_ix_cell, cell_block_idx
+        integer :: jj, max_particle_contacts_check
+        real(8) :: dx, dz               ! 位置差計算用
+        integer :: curr_j_idx
+        real(8) :: search_extent        ! 近傍探索半径
+
+        max_particle_contacts_check = 10 ! 元のコードのループ(do 11 jj=1,10)から、粒子間接触は最大10個と仮定
+
+        xi = x_coord(particle_i_idx)
+        zi = z_coord(particle_i_idx)
+        ri_particle_i = radius(particle_i_idx)
+
+        ! セル格子内での探索範囲を決定
+        if (cell_size <= 0.0d0) stop "pcont_sub: cell_sizeが正ではありません。"
+
+        ! 以前は ±(2*rmax) で探索していたが、cell_size が大きい場合に隣接セル2つ分を
+        ! またぐ衝突を取りこぼすことがあった。そこで探索半径を (2*rmax + cell_size) に拡張する。
+        search_extent = 2.0d0 * rmax_val + cell_size
+
+        iz_cell_max = idint((zi + search_extent) / cell_size)
+        iz_cell_min = idint((zi - search_extent) / cell_size)
+        ix_cell_min = idint((xi - search_extent) / cell_size)
+        ix_cell_max = idint((xi + search_extent) / cell_size)
+
+        ! セルインデックスを有効なグリッド境界内に収める
+        iz_cell_max = min(iz_cell_max, cells_z_dir - 1)
+        iz_cell_min = max(iz_cell_min, 0)
+        ix_cell_min = max(ix_cell_min, 0)
+        ix_cell_max = min(ix_cell_max, cells_x_dir - 1)
+        
+        if (iz_cell_max < iz_cell_min .or. ix_cell_max < ix_cell_min) then
+             ! 粒子が通常の領域外にある場合や、rmax_valが小さすぎて探索範囲が無効になる場合に発生しうる
+             return
+        end if
+
+        ! デバッグ出力 (検証モードで粒子1のみ)
+        if (validation_mode .and. particle_i_idx == 1) then
+            write(*,'(A,I2,A,I3,A,I3,A,I3,A,I3)') 'Search p',particle_i_idx,': cells x[',ix_cell_min,':',ix_cell_max,'] z[',iz_cell_min,':',iz_cell_max,']'
+            write(*,'(A,ES12.5,A,ES12.5,A,ES12.5)') 'Position: x=',xi,', z=',zi,', search_extent=',search_extent
+        end if
+
+        do current_iz_cell = iz_cell_min, iz_cell_max      ! z方向のセルループ
+            do current_ix_cell = ix_cell_min, ix_cell_max  ! x方向のセルループ
+                if (cells_x_dir <=0) stop "pcont_sub: cells_x_dirが正ではありません。"
+                cell_block_idx = current_iz_cell * cells_x_dir + current_ix_cell + 1
+
+                if (cell_block_idx <= 0 .or. cell_block_idx > (cells_x_dir * cells_z_dir) ) cycle ! セルが範囲外ならスキップ
+
+                curr_j_idx = cell_head(cell_block_idx) ! セルに属する最初の粒子
+
+                do while (curr_j_idx > 0)
+                    particle_j_idx = curr_j_idx
+
+                    if (particle_j_idx == particle_i_idx) then
+                        curr_j_idx = particle_cell_next(curr_j_idx)
+                        cycle
+                    end if
+
+                    xj = x_coord(particle_j_idx)
+                    zj = z_coord(particle_j_idx)
+                    rj_particle_j = radius(particle_j_idx)
+
+                    dx = xi - xj
+                    dz = zi - zj
+                    center_dist = sqrt(dx*dx + dz*dz) 
+                    overlap_gap = (ri_particle_i + rj_particle_j) - center_dist ! 重なり量 (正なら接触)
+
+                    if (overlap_gap > 0.0d0) then ! 粒子が接触している (重なっている)
+                        ! デバッグ出力 (検証モードのみ)
+                        if (validation_mode) then
+                            write(*,'(A,I2,A,I2,A,ES12.5,A,ES12.5,A,ES12.5)') &
+                                'Contact p',particle_i_idx,' <-> p',particle_j_idx,': dist=',center_dist,', overlap=',overlap_gap,', sumr=',ri_particle_i+rj_particle_j
+                        end if
+
+                        if (center_dist < 1.0d-12) then ! 粒子中心が完全に一致する場合のゼロ除算を回避
+                            contact_angle_cos = 1.0d0   ! 暫定的にx軸方向とする
+                            contact_angle_sin = 0.0d0
+                        else
+                            ! 法線ベクトル (i から j へ向かう方向) の成分
+                            contact_angle_cos = (xj - xi) / center_dist 
+                            contact_angle_sin = (zj - zi) / center_dist
+                        end if
+                        
+                        ! ---- 連絡スロット確保 (i -> j) ----------------
+                        contact_slot_for_i_j = 0
+                        do jj = 1, max_particle_contacts_check
+                            if (contact_partner_idx(particle_i_idx, jj) == particle_j_idx) then
+                                contact_slot_for_i_j = jj
+                                exit
+                            end if
+                        end do
+                        if (contact_slot_for_i_j == 0) then
+                            do jj = 1, max_particle_contacts_check
+                                if (contact_partner_idx(particle_i_idx, jj) == 0) then
+                                    contact_slot_for_i_j = jj
+                                    contact_partner_idx(particle_i_idx, jj) = particle_j_idx
+                                    exit
+                                end if
+                            end do
+                        end if
+                        if (contact_slot_for_i_j == 0) then
+                            curr_j_idx = particle_cell_next(curr_j_idx)
+                            cycle  ! スロット不足
+                        end if
+
+                        ! -------------------------------------------------
+
+                        ! 実際の力計算
+                        if (validation_mode) then
+                            call actf_sub(particle_i_idx, particle_j_idx, contact_slot_for_i_j, &
+                                          contact_angle_sin, contact_angle_cos, overlap_gap, 1.0d0, 1.0d0)
+                        else
+                            call actf_sub(particle_i_idx, particle_j_idx, contact_slot_for_i_j, &
+                                          contact_angle_sin, contact_angle_cos, overlap_gap, 0.5d0, 0.5d0)
+                        end if
+                    else ! 幾何学的な接触なし / 粒子が離れた
+                        ! デバッグ出力 (検証モードのみ、最初の数回のみ)
+                        if (validation_mode .and. particle_i_idx == 1 .and. particle_j_idx == 2) then
+                            write(*,'(A,I2,A,I2,A,ES12.5,A,ES12.5,A,ES12.5)') &
+                                'No contact p',particle_i_idx,' <-> p',particle_j_idx,': dist=',center_dist,', overlap=',overlap_gap,', sumr=',ri_particle_i+rj_particle_j
+                        end if
+
+                        ! particle_i_idx の particle_j_idx に関する接触情報をクリア
+                        do jj = 1, max_particle_contacts_check
+                            if (contact_partner_idx(particle_i_idx, jj) == particle_j_idx) then
+                                normal_force_contact(particle_i_idx, jj) = 0.0d0
+                                shear_force_contact(particle_i_idx, jj) = 0.0d0
+                                contact_partner_idx(particle_i_idx, jj) = 0
+                                exit
+                            end if
+                        end do
+                    end if
+
+                    curr_j_idx = particle_cell_next(curr_j_idx) ! セル内の次の粒子へ
+                end do !! セル内連結リスト走査
+            end do ! x方向セルループ
+        end do     ! z方向セルループ
+    end subroutine pcont_sub
+
+    !> 粒子の位置と速度を更新するサブルーチン
+    subroutine nposit_sub(judge_static)
+        use simulation_constants_mod, only: GRAVITY_ACCEL
+        use simulation_parameters_mod, only: time_step, validation_mode
+        use particle_data_mod
+        use cell_system_mod, only: num_particles
+        implicit none
+        integer, intent(out) :: judge_static ! 出力: 静止判定フラグ (1なら静止)
+
+        integer :: i
+        real(8) :: sum_abs_disp, avg_abs_disp
+        real(8) :: grav
+
+        if (validation_mode) then
+            grav = 0.0d0
+        else
+            grav = GRAVITY_ACCEL
+        end if
+
+        sum_abs_disp = 0.0d0
+        do i = 1, num_particles
+            ! 速度の更新 (オイラー積分)
+            z_vel(i) = z_vel(i) + (z_force_sum(i)/mass(i) - grav) * time_step
+            x_vel(i) = x_vel(i) + (x_force_sum(i)/mass(i)) * time_step
+            rotation_vel(i) = rotation_vel(i) + (moment_sum(i)/moment_inertia(i)) * time_step
+
+            ! 現ステップの変位増分を更新 (元のコードの修正オイラー/平均化スキーム)
+            ! v(i)=(v0(i)*dt+v(i))/2.d0 ここで右辺のv(i)は前ステップの変位増分。
+            z_disp_incr(i) = (z_vel(i) * time_step + z_disp_incr(i)) / 2.0d0
+            x_disp_incr(i) = (x_vel(i) * time_step + x_disp_incr(i)) / 2.0d0
+            rot_disp_incr(i) = (rotation_vel(i) * time_step + rot_disp_incr(i)) / 2.0d0
+            
+            ! 位置と回転角の更新
+            z_coord(i) = z_coord(i) + z_disp_incr(i)
+            x_coord(i) = x_coord(i) + x_disp_incr(i)
+            rotation_angle(i) = rotation_angle(i) + rot_disp_incr(i)
+
+            sum_abs_disp = sum_abs_disp + abs(x_disp_incr(i)) + abs(z_disp_incr(i))
+        end do
+
+        ! 静止状態の判定
+        if (num_particles > 0) then
+            avg_abs_disp = sum_abs_disp / real(num_particles, 8) / 2.0d0 ! 元のコードの /2.d0
+            if (avg_abs_disp < (time_step * time_step * GRAVITY_ACCEL * 1.0d-1)) then
+                judge_static = 1
+            else
+                judge_static = 0
+            end if
+        else
+            judge_static = 1 ! 粒子がなければ静止とみなす
+        end if
+    end subroutine nposit_sub
+
+    !> 粒子iと粒子/壁jとの間の実際の接触力（法線方向およびせん断方向）を計算するサブルーチン
+    subroutine actf_sub(p_i, p_j, contact_slot_idx_for_pi, angle_sin, angle_cos, initial_overlap, en_coeff, et_coeff)
+        ! p_i: 主となる粒子のインデックス
+        ! p_j: 他方の粒子インデックス (<= num_particles の場合) または壁ID (> num_particles の場合)
+        ! contact_slot_idx_for_pi: p_i の接触配列における p_j のスロット
+        ! angle_sin, angle_cos: p_i から p_j の中心/接触点への法線ベクトル成分
+        ! initial_overlap: 幾何学的な重なり量、接触していれば正
+        ! en_coeff, et_coeff: 反発係数 (normal, tangential)
+        use simulation_constants_mod, only: ni_max
+        use simulation_parameters_mod, only: time_step, validation_mode
+        use particle_data_mod
+        use cell_system_mod, only: num_particles
+        implicit none
+
+        integer, intent(in) :: p_i, p_j, contact_slot_idx_for_pi
+        real(8), intent(in) :: angle_sin, angle_cos, initial_overlap
+        real(8), intent(in) :: en_coeff, et_coeff ! 反発係数 (normal, tangential)
+
+        real(8) :: ri_val, rj_val, effective_mass
+        real(8) :: kn_normal_stiffness, ks_shear_stiffness ! 法線・せん断バネ定数 Kn, Ks
+        real(8) :: damping_coeff_normal, damping_coeff_shear ! 法線・せん断粘性係数 ηn, ηs
+        real(8) :: rel_disp_normal_incr, rel_disp_shear_incr ! 法線・せん断方向の相対変位増分 Δun, Δus
+        real(8) :: damping_force_normal, damping_force_shear ! 法線・せん断方向の粘性抵抗力 dn, ds
+        real(8) :: total_normal_force, total_shear_force     ! 全法線力 fn, 全せん断力 fs
+        real(8) :: friction_coeff_current      ! 現在の摩擦係数 μ
+        real(8) :: critical_time_step_check    ! 安定性チェック用の時間刻み (ddt)
+
+        real(8) :: x_disp_incr_pi, z_disp_incr_pi, rot_disp_incr_pi ! 粒子iの変位増分
+        real(8) :: x_disp_incr_pj, z_disp_incr_pj, rot_disp_incr_pj ! 粒子j(または壁=0)の変位増分
+        real(8) :: mass_pi, mass_pj                                 ! 粒子i,jの質量
+        real(8) :: r_eff ! 宣言をここに移動
+
+        ri_val = radius(p_i)
+        x_disp_incr_pi = x_disp_incr(p_i)
+        z_disp_incr_pi = z_disp_incr(p_i)
+        rot_disp_incr_pi = rot_disp_incr(p_i)
+        mass_pi = mass(p_i)
+
+        if (p_j <= num_particles) then ! 粒子間
+            rj_val = radius(p_j)
+            x_disp_incr_pj = x_disp_incr(p_j)
+            z_disp_incr_pj = z_disp_incr(p_j)
+            rot_disp_incr_pj = rot_disp_incr(p_j)
+            mass_pj = mass(p_j)
+            if (mass_pi + mass_pj > 1.0d-20) then
+                 effective_mass = mass_pi * mass_pj / (mass_pi + mass_pj) ! 等価質量 m_eff = m1*m2/(m1+m2)
+            else
+                 effective_mass = mass_pi ! フォールバック
+            end if
+            friction_coeff_current = friction_coeff_particle
+            r_eff = ri_val * rj_val / (ri_val + rj_val) ! 等価半径 Reff = ri*rj/(ri+rj)
+            
+            ! Hertz接触理論に基づく法線剛性 (粒子間)
+            kn_normal_stiffness = (4.0d0/3.0d0) * sqrt(r_eff) * &
+                                 young_modulus_particle / (1.0d0 - poisson_ratio_particle**2) * &
+                                 sqrt(initial_overlap)
+            if (kn_normal_stiffness < 1.0d6) kn_normal_stiffness = 1.0d6 ! 最小値設定
+        else ! 粒子-壁接触
+            rj_val = 0.0d0 ! 壁の半径は実質無限大、または変位にrjは使用しない
+            x_disp_incr_pj = 0.0d0 ! 壁は動かないと仮定
+            z_disp_incr_pj = 0.0d0
+            rot_disp_incr_pj = 0.0d0
+            effective_mass = mass_pi   ! 等価質量 m_eff = m1
+            friction_coeff_current = friction_coeff_wall
+            r_eff = ri_val ! 粒子-壁接触では粒子半径を使用
+            
+            ! Hertz接触理論に基づく法線剛性 (粒子-壁)
+            kn_normal_stiffness = (4.0d0/3.0d0) * sqrt(r_eff) * &
+                                 young_modulus_particle * young_modulus_wall / &
+                                 ((1.0d0-poisson_ratio_particle**2)*young_modulus_wall + &
+                                  (1.0d0-poisson_ratio_wall**2)*young_modulus_particle) * &
+                                 sqrt(initial_overlap)
+            if (kn_normal_stiffness < 1.0d6) kn_normal_stiffness = 1.0d6 ! 最小値設定
+        end if
+        ks_shear_stiffness = kn_normal_stiffness * shear_to_normal_stiffness_ratio
+
+        ! 完全弾性衝突 (e=1) のための粘性係数設定
+        if (validation_mode .and. en_coeff >= 0.99d0) then
+            ! 完全弾性衝突の場合、粘性をほぼゼロに設定
+            damping_coeff_normal = 0.0d0
+            damping_coeff_shear = 0.0d0
+        else
+            ! 粘性係数 (反発係数に基づいて計算)
+            if (effective_mass > 0.0d0 .and. kn_normal_stiffness > 0.0d0 .and. en_coeff > 1.0d-6) then
+                damping_coeff_normal = -2.0d0 * log(en_coeff) * sqrt(effective_mass * kn_normal_stiffness / (log(en_coeff)**2 + PI_VAL**2))
+            else
+                damping_coeff_normal = 0.0d0
+            end if
+            if (effective_mass > 0.0d0 .and. ks_shear_stiffness > 0.0d0 .and. et_coeff > 1.0d-6) then
+                damping_coeff_shear = -2.0d0 * log(et_coeff) * sqrt(effective_mass * ks_shear_stiffness / (log(et_coeff)**2 + PI_VAL**2))
+            else
+                damping_coeff_shear = 0.0d0
+            end if
+        end if
+        
+        ! 安定性基準のチェック (元のddt、レイリー時間刻みに関連)
+        if (kn_normal_stiffness > 1.0d-12) then
+           critical_time_step_check = 0.1d0 * sqrt(effective_mass / kn_normal_stiffness)
+           if (critical_time_step_check < time_step .and. critical_time_step_check > 1.0d-12) then 
+                ! write(*,*) '安定性チェック: ddt_checkがtime_stepより小さい可能性 粒子 ', p_i, p_j
+                ! write(*,*) 'ddt_check =', critical_time_step_check, ' Kn=', kn_normal_stiffness, ' M_eff=', effective_mass
+           end if
+        end if
+
+        ! 相対変位増分 (現時間ステップ time_step における)
+        ! angle成分は粒子p_iからp_jへの法線ベクトルを定義
+        rel_disp_normal_incr = (x_disp_incr_pi - x_disp_incr_pj) * angle_cos + &
+                               (z_disp_incr_pi - z_disp_incr_pj) * angle_sin
+        rel_disp_shear_incr = -(x_disp_incr_pi - x_disp_incr_pj) * angle_sin + &
+                               (z_disp_incr_pi - z_disp_incr_pj) * angle_cos + &
+                               (ri_val * rot_disp_incr_pi + rj_val * rot_disp_incr_pj)
+
+
+        ! 初期接触の処理: 新規接触の場合、法線変位に基づいてせん断変位をスケーリング
+        if (abs(normal_force_contact(p_i, contact_slot_idx_for_pi)) < 1.0d-8) then ! 新規接触
+            ! 新規接触の場合、弾性力を重なり量に基づいて初期化
+            if (validation_mode) then
+                ! 検証モードでは線形ばねモデルを使用
+                normal_force_contact(p_i, contact_slot_idx_for_pi) = kn_normal_stiffness * initial_overlap
+            else
+                ! 通常モードではHertzモデル
+                normal_force_contact(p_i, contact_slot_idx_for_pi) = kn_normal_stiffness * initial_overlap
+            end if
+            shear_force_contact(p_i, contact_slot_idx_for_pi) = 0.0d0 ! せん断力は初期化時にゼロ
+        else
+            ! 既存接触の場合、増分で更新
+            normal_force_contact(p_i, contact_slot_idx_for_pi) = normal_force_contact(p_i, contact_slot_idx_for_pi) + &
+                                                                 kn_normal_stiffness * rel_disp_normal_incr
+            shear_force_contact(p_i, contact_slot_idx_for_pi) = shear_force_contact(p_i, contact_slot_idx_for_pi) + &
+                                                                ks_shear_stiffness * rel_disp_shear_incr
+        end if
+
+        ! 弾性力成分の更新 (式3.7, 3.10)
+        normal_force_contact(p_i, contact_slot_idx_for_pi) = normal_force_contact(p_i, contact_slot_idx_for_pi) + &
+                                                             kn_normal_stiffness * rel_disp_normal_incr
+        shear_force_contact(p_i, contact_slot_idx_for_pi) = shear_force_contact(p_i, contact_slot_idx_for_pi) + &
+                                                            ks_shear_stiffness * rel_disp_shear_incr
+        
+        ! 粘性抵抗力成分の計算 (式3.6, 3.9)
+        if (time_step > 1.0d-20) then
+             damping_force_normal = damping_coeff_normal * rel_disp_normal_incr / time_step
+             damping_force_shear = damping_coeff_shear * rel_disp_shear_incr / time_step
+        else
+             damping_force_normal = 0.0d0
+             damping_force_shear  = 0.0d0
+        end if
+
+        ! 引張力のチェック (粒子が引き離される場合) - 付着力は考慮しない
+        if (normal_force_contact(p_i, contact_slot_idx_for_pi) < 0.0d0) then
+            normal_force_contact(p_i, contact_slot_idx_for_pi) = 0.0d0
+            shear_force_contact(p_i, contact_slot_idx_for_pi) = 0.0d0
+            damping_force_normal = 0.0d0
+            damping_force_shear = 0.0d0
+            contact_partner_idx(p_i, contact_slot_idx_for_pi) = 0 ! 引張なら接触を切る
+            return ! 引き離される場合は力なし
+        end if
+
+        ! クーロンの摩擦法則を適用 (式3.11)
+        if (abs(shear_force_contact(p_i, contact_slot_idx_for_pi)) > &
+            friction_coeff_current * normal_force_contact(p_i, contact_slot_idx_for_pi)) then
+            shear_force_contact(p_i, contact_slot_idx_for_pi) = friction_coeff_current * &
+                normal_force_contact(p_i, contact_slot_idx_for_pi) * &
+                sign(1.0d0, shear_force_contact(p_i, contact_slot_idx_for_pi))
+            damping_force_shear = 0.0d0 ! 滑りが発生している場合はせん断粘性なし
+        end if
+
+        ! 粘性を含む合計の力 (式3.8, 3.12)
+        total_normal_force = normal_force_contact(p_i, contact_slot_idx_for_pi) + damping_force_normal
+        total_shear_force = shear_force_contact(p_i, contact_slot_idx_for_pi) + damping_force_shear
+
+        ! 粒子p_iに力を適用 (式3.13)
+        ! 法線力は中心を結ぶ線に沿って作用 (angle_cos, angle_sin で定義される iからjへの方向)
+        ! せん断力はそれに垂直。
+        x_force_sum(p_i) = x_force_sum(p_i) - total_normal_force * angle_cos + total_shear_force * angle_sin
+        z_force_sum(p_i) = z_force_sum(p_i) - total_normal_force * angle_sin - total_shear_force * angle_cos
+        moment_sum(p_i) = moment_sum(p_i) - ri_val * total_shear_force
+
+        ! 粒子p_jに反作用力を適用 (相手が粒子の場合)
+        if (p_j <= num_particles .and. contact_slot_idx_for_pi <= 10) then ! 元の jk < 10 は粒子間接触のチェック
+            x_force_sum(p_j) = x_force_sum(p_j) + total_normal_force * angle_cos - total_shear_force * angle_sin
+            z_force_sum(p_j) = z_force_sum(p_j) + total_normal_force * angle_sin + total_shear_force * angle_cos
+            moment_sum(p_j) = moment_sum(p_j) - rj_val * total_shear_force ! p_jに対するせん断力は同じ大きさ、逆向きの回転効果
+            
+            ! デバッグ出力 (検証モードのみ)
+            if (validation_mode .and. abs(total_normal_force) > 1.0d-6) then
+                write(*,'(A,I2,A,I2,A,ES12.5,A,ES12.5)') 'Force p',p_i,' -> p',p_j,': Fn=',total_normal_force,', Fs=',total_shear_force
+                write(*,'(A,ES12.5,A,ES12.5)') '  overlap=',initial_overlap,', dist=',sqrt((x_coord(p_i)-x_coord(p_j))**2 + (z_coord(p_i)-z_coord(p_j))**2)
+            end if
+        end if
+    end subroutine actf_sub
+
+    !> グラフィック用データを出力するサブルーチン
+    subroutine gfout_sub(iter_step, time_val, rmax_val)
+        use simulation_constants_mod, only: nj_max
+        use particle_data_mod
+        use cell_system_mod, only: num_particles, container_width
+        implicit none
+        integer, intent(in) :: iter_step    ! 現在のイテレーションステップ
+        real(8), intent(in) :: time_val, rmax_val ! 現在時刻、最大粒子半径
+        integer :: i,j
+
+        if (iter_step == 1) then
+            open(unit=10, file='../data/graph11.d', status='replace', action='write')
+            open(unit=11, file='../data/graph21.d', status='replace', action='write')
+        end if
+        ! 初回以降は追記モードで開くか、性能が許せば開いたままにする。
+        ! 簡単のため、ここでは毎回開く(replace)。元のコードはファイルを開きっぱなしにするか、適切に再オープン。
+
+        write(10,*) num_particles, time_val, container_width, rmax_val
+        if (num_particles > 0) then
+            write(10,'(1000(ES12.5,1X,ES12.5,1X,ES12.5,2X))') (sngl(x_coord(i)), sngl(z_coord(i)), sngl(radius(i)), i=1,num_particles)
+            write(10,'(1000(ES12.5,1X,ES12.5,1X,ES12.5,2X))') (sngl(x_vel(i)), sngl(z_vel(i)), sngl(rotation_vel(i)), i=1,num_particles)
+        end if
+        
+        ! 接触力の出力 (オプション、graph21.dより)
+        write(11,*) 'Time: ', time_val 
+        if (num_particles > 0) then
+            do i = 1, num_particles
+                 write(11,'(A,I5,A,I5)') 'Particle: ', i, ' NumContacts: ', count(contact_partner_idx(i,1:nj_max) > 0)
+                 write(11,'(2X,A,13(ES10.3,1X))') 'ShearF: ', (shear_force_contact(i,j), j=1,nj_max)
+                 write(11,'(2X,A,13(ES10.3,1X))') 'NormalF:', (normal_force_contact(i,j), j=1,nj_max)
+                 write(11,'(2X,A,13(I5,2X))')    'Partner:', (contact_partner_idx(i,j), j=1,nj_max)
+            end do
+        end if
+
+        ! 元のコードではここでファイルを閉じない。プログラム終了時に閉じられることを示唆。
+    end subroutine gfout_sub
+
+    !> バックアップデータを出力するサブルーチン
+    subroutine bfout_sub
+        use simulation_constants_mod
+        use simulation_parameters_mod
+        use particle_data_mod
+        use cell_system_mod
+        implicit none
+        integer :: i, j
+        real(8) :: rmax_dummy_val ! 元のbfoutはrmaxを必要とするが、メインの呼び出しからは渡されない。
+                                  ! リストアに不可欠でないか、粒子半径から取得すると仮定。
+        
+        if (num_particles > 0) then
+           rmax_dummy_val = maxval(radius(1:num_particles))
+        else
+           rmax_dummy_val = 0.0d0
+        end if
+
+        open(unit=13, file='../data/backl.d', status='replace', action='write')
+
+        write(13,*) num_particles, cells_x_dir, cells_z_dir, particle_gen_layers
+        write(13,*) rmax_dummy_val, 0.0d0, container_width, cell_size, time_step ! current_timeではなく初期t=0を保存すると仮定
+        write(13,*) particle_density, friction_coeff_particle, friction_coeff_wall, GRAVITY_ACCEL, PI_VAL
+        write(13,*) young_modulus_particle, young_modulus_wall, poisson_ratio_particle, poisson_ratio_wall, shear_to_normal_stiffness_ratio
+        
+        if (num_particles > 0) then
+            write(13,*) (mass(i), moment_inertia(i), i=1,num_particles)
+            write(13,*) (x_coord(i), z_coord(i), radius(i), i=1,num_particles)
+            write(13,*) (x_disp_incr(i), z_disp_incr(i), rot_disp_incr(i), i=1,num_particles) ! u,v,f (dpm)
+            write(13,*) (x_vel(i), z_vel(i), rotation_vel(i), i=1,num_particles)            ! u0,v0,f0
+            do i = 1, num_particles
+                write(13,*) (shear_force_contact(i,j), normal_force_contact(i,j), j=1,nj_max)
+                write(13,*) (contact_partner_idx(i,j), j=1,nj_max)
+            end do
+        end if
+        close(13)
+    end subroutine bfout_sub
+
+    !> 擬似乱数を生成するサブルーチン
+    subroutine custom_random(seed_io, random_val_out)
+        implicit none
+        integer, intent(inout) :: seed_io          ! ジェネレータの現在の状態を保持
+        real(8), intent(out)   :: random_val_out   ! [0,1) の一様乱数
+
+        ! 元のコードの定数とロジックを可能な限り再現
+        seed_io = seed_io * 65539 
+        if (seed_io < 0) then
+             seed_io = (seed_io + 2147483647) + 1 
+        end if
+        random_val_out = dble(seed_io) * 0.4656613d-9 ! 元の正規化定数 (1.0 / 2147483648.0)
+
+    end subroutine custom_random
+
+end program two_dimensional_pem
