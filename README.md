@@ -2,7 +2,7 @@
 
 2次元粒子要素法（Particle Element Method）による離散要素法シミュレーションプログラムです。粒子間の接触・衝突現象をHertz接触理論に基づいて数値計算します。
 
-![PEM Animation](src/pem_animation.gif)
+![PEM Animation](pem_animation.gif)
 
 ## 🔬 主な機能
 
