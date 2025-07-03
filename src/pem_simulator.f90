@@ -26,7 +26,7 @@ module simulation_parameters_mod
     real(8) :: shear_to_normal_stiffness_ratio    ! so: せん断弾性係数と法線方向弾性係数の比 (G/E関連)
     real(8) :: particle_density = 2.48d3         ! de: 粒子の密度
 
-    logical :: validation_mode = .true.
+    logical :: validation_mode = .false.
 
     save ! これらの値が初期化され、保持されることを保証
 end module simulation_parameters_mod
