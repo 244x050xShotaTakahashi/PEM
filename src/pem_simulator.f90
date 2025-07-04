@@ -16,19 +16,40 @@ module simulation_parameters_mod
     use simulation_constants_mod, only: ni_max
     implicit none
 
-    real(8) :: time_step = 5.0d-7                 ! dt: 時間刻み (検証のためより小さく)
-    real(8) :: friction_coeff_particle = 0.25d0   ! fri: 粒子間摩擦係数
-    real(8) :: friction_coeff_wall     = 0.17d0   ! frw: 壁-粒子間摩擦係数
-    real(8) :: young_modulus_particle = 4.9d9     ! e: 粒子のヤング率
-    real(8) :: young_modulus_wall = 3.9d9         ! ew: 壁のヤング率
-    real(8) :: poisson_ratio_particle = 0.23d0    ! po: 粒子のポアソン比
-    real(8) :: poisson_ratio_wall = 0.25d0        ! pow: 壁のポアソン比
-    real(8) :: shear_to_normal_stiffness_ratio    ! so: せん断弾性係数と法線方向弾性係数の比 (G/E関連)
-    real(8) :: particle_density = 2.48d3         ! de: 粒子の密度
+    ! シミュレーション制御パラメータ
+    real(8) :: time_step                      ! dt: 時間刻み
+    real(8) :: friction_coeff_particle        ! fri: 粒子間摩擦係数
+    real(8) :: friction_coeff_wall            ! frw: 壁-粒子間摩擦係数
+    real(8) :: young_modulus_particle         ! e: 粒子のヤング率
+    real(8) :: young_modulus_wall             ! ew: 壁のヤング率
+    real(8) :: poisson_ratio_particle         ! po: 粒子のポアソン比
+    real(8) :: poisson_ratio_wall             ! pow: 壁のポアソン比
+    real(8) :: shear_to_normal_stiffness_ratio ! so: せん断弾性係数と法線方向弾性係数の比
+    real(8) :: particle_density               ! de: 粒子の密度
+    
+    ! 粒子生成パラメータ
+    real(8) :: particle_radius_large          ! r1: 大きな粒子の半径
+    real(8) :: particle_radius_small          ! r2: 小さな粒子の半径
+    real(8) :: container_width                ! w: 容器の幅
+    integer :: particle_gen_layers            ! ipz: 初期粒子生成層数
+    integer :: random_seed                    ! 乱数シード
+    
+    ! 検証モード設定
+    logical :: validation_mode                ! 検証モードフラグ
+    real(8) :: validation_particle1_x        ! 検証モード: 粒子1のx座標
+    real(8) :: validation_particle1_z        ! 検証モード: 粒子1のz座標
+    real(8) :: validation_particle2_x        ! 検証モード: 粒子2のx座標
+    real(8) :: validation_particle2_z        ! 検証モード: 粒子2のz座標
+    real(8) :: validation_particle1_vx       ! 検証モード: 粒子1の初期x速度
+    real(8) :: validation_particle2_vx       ! 検証モード: 粒子2の初期x速度
+    real(8) :: validation_particle_radius    ! 検証モード: 粒子半径
+    
+    ! 出力制御パラメータ
+    integer :: output_interval_normal         ! 通常モード出力間隔
+    integer :: output_interval_validation     ! 検証モード出力間隔
+    integer :: max_calculation_steps          ! 最大計算ステップ数
 
-    logical :: validation_mode = .false.
-
-    save ! これらの値が初期化され、保持されることを保証
+    save
 end module simulation_parameters_mod
 
 ! モジュール: 粒子固有データ (物理特性、運動学、力)
@@ -77,9 +98,7 @@ module cell_system_mod
     integer :: num_particles          ! n: 粒子数
     integer :: cells_x_dir            ! idx: x方向のセル数
     integer :: cells_z_dir            ! idz: z方向のセル数 (使用状況から推測)
-    integer :: particle_gen_layers    ! ipz: 初期粒子生成層数
 
-    real(8) :: container_width        ! w: 容器の幅
     real(8) :: cell_size              ! c: セルの幅/サイズ
 
     ! 各セルに属する粒子を連結リストで保持する（セル先頭 index → next → ...）
@@ -102,11 +121,14 @@ program two_dimensional_pem
     use cell_system_mod
     implicit none
 
-    integer, parameter :: MAX_STEPS = 2000000      ! 最大計算ステップ数
     integer :: it_step, static_judge_flag          ! static_judge_flag: 静止判定フラグ
     integer :: i ! ループカウンタ用にiを宣言
     real(8) :: current_time                        ! 現在時刻
     real(8) :: rmax_particle_radius                ! fpositから返される最大粒子半径
+    
+    ! 計算時間計測用変数
+    integer :: start_time, end_time, clock_rate
+    real(8) :: elapsed_time
     
     ! --- ▼ 1D 衝突検証用追加変数 ▼ ---
     logical :: collision_started = .false.  ! 衝突が開始したか
@@ -117,6 +139,12 @@ program two_dimensional_pem
     real(8) :: m1, m2, e_coeff, v1_theo, v2_theo, err1, err2 ! 評価用
     real(8) :: ke_initial, ke_final, ke_theo ! エネルギー保存チェック用
 
+    ! 計算時間計測開始
+    call system_clock(start_time, clock_rate)
+    
+    ! inputファイルからパラメータを読み込み
+    call read_input_file
+    
     ! 初期位置と初期条件の設定
     call fposit_sub(rmax_particle_radius)
     call inmat_sub
@@ -126,9 +154,9 @@ program two_dimensional_pem
     ! 検証モードの場合：初期水平速度と摩擦係数を設定
     ! -----------------------------------------------
     if (validation_mode) then
-        ! 粒子1に 20 m/s、粒子2は静止
-        x_vel(1) = 20.0d0
-        x_vel(2) = 0.0d0
+        ! 粒子1に指定された速度、粒子2は静止
+        x_vel(1) = validation_particle1_vx
+        x_vel(2) = validation_particle2_vx
         z_vel(1) = 0.0d0
         z_vel(2) = 0.0d0
 
@@ -144,7 +172,7 @@ program two_dimensional_pem
     current_time = 0.0d0
 
     ! 各ステップの繰り返し計算
-    do it_step = 1, MAX_STEPS
+    do it_step = 1, max_calculation_steps
         current_time = current_time + time_step
 
         ! 粒子をセルに格納
@@ -252,13 +280,13 @@ program two_dimensional_pem
 
         ! グラフィック用データの出力
         if (validation_mode) then
-            ! 検証モードでは10ステップごとに出力
-            if (it_step == 1 .or. mod(it_step, 10) == 0) then
+            ! 検証モードでは指定間隔で出力
+            if (it_step == 1 .or. mod(it_step, output_interval_validation) == 0) then
                 call gfout_sub(it_step, current_time, rmax_particle_radius)
             end if
         else
-            ! 通常モードでは50000ステップごとに出力
-            if (it_step == 1 .or. mod(it_step, 50000) == 0) then
+            ! 通常モードでは指定間隔で出力
+            if (it_step == 1 .or. mod(it_step, output_interval_normal) == 0) then
                 call gfout_sub(it_step, current_time, rmax_particle_radius)
             end if
         end if
@@ -269,17 +297,147 @@ program two_dimensional_pem
     ! バックアップデータの出力
     call bfout_sub
 
-    close(10) ! ../data/graph11.d (グラフィックデータファイル1)
-    close(11) ! ../data/graph21.d (グラフィックデータファイル2)
-    close(13) ! ../data/backl.d (バックアップファイル、bfout_subで開かれていれば)
+    close(10) ! data/graph11.d (グラフィックデータファイル1)
+    close(11) ! data/graph21.d (グラフィックデータファイル2)
+    close(13) ! data/backl.d (バックアップファイル、bfout_subで開かれていれば)
+
+    ! 計算時間計測終了
+    call system_clock(end_time)
+    elapsed_time = real(end_time - start_time) / real(clock_rate)
+    write(*,*) '計算時間: ', elapsed_time, ' 秒'
 
     stop
 contains
 
+    !> inputファイルからパラメータを読み込むサブルーチン
+    subroutine read_input_file
+        implicit none
+        character(len=256) :: line, keyword
+        character(len=256) :: input_filename
+        integer :: ios, unit_num
+        real(8) :: value
+        
+        ! inputファイル名の決定（コマンドライン引数または固定名）
+        if (command_argument_count() > 0) then
+            call get_command_argument(1, input_filename)
+        else
+            input_filename = "input.dat"
+        end if
+        
+        write(*,*) 'inputファイルを読み込み中: ', trim(input_filename)
+        
+        unit_num = 20
+        open(unit=unit_num, file=input_filename, status='old', action='read', iostat=ios)
+        if (ios /= 0) then
+            write(*,*) 'エラー: inputファイルを開けません: ', trim(input_filename)
+            stop
+        end if
+        
+        ! デフォルト値の設定
+        time_step = 5.0d-7
+        friction_coeff_particle = 0.25d0
+        friction_coeff_wall = 0.17d0
+        young_modulus_particle = 4.9d9
+        young_modulus_wall = 3.9d9
+        poisson_ratio_particle = 0.23d0
+        poisson_ratio_wall = 0.25d0
+        particle_density = 2.48d3
+        particle_radius_large = 1.0d-2
+        particle_radius_small = 5.0d-3
+        container_width = 5.0d-1
+        particle_gen_layers = 30
+        random_seed = 584287
+        validation_mode = .false.
+        validation_particle1_x = 3.0d0
+        validation_particle1_z = 3.0d0
+        validation_particle2_x = 6.0d0
+        validation_particle2_z = 3.0d0
+        validation_particle1_vx = 20.0d0
+        validation_particle2_vx = 0.0d0
+        validation_particle_radius = 1.0d0
+        output_interval_normal = 50000
+        output_interval_validation = 10
+        max_calculation_steps = 2000000
+        
+        do
+            read(unit_num, '(A)', iostat=ios) line
+            if (ios /= 0) exit
+            
+            ! コメント行と空行をスキップ
+            if (line(1:1) == '#' .or. line(1:1) == '!' .or. len_trim(line) == 0) cycle
+            
+            ! キーワードと値を分離
+            read(line, *, iostat=ios) keyword, value
+            if (ios /= 0) cycle
+            
+            select case (trim(keyword))
+                case ('TIME_STEP')
+                    time_step = value
+                case ('FRICTION_COEFF_PARTICLE')
+                    friction_coeff_particle = value
+                case ('FRICTION_COEFF_WALL')
+                    friction_coeff_wall = value
+                case ('YOUNG_MODULUS_PARTICLE')
+                    young_modulus_particle = value
+                case ('YOUNG_MODULUS_WALL')
+                    young_modulus_wall = value
+                case ('POISSON_RATIO_PARTICLE')
+                    poisson_ratio_particle = value
+                case ('POISSON_RATIO_WALL')
+                    poisson_ratio_wall = value
+                case ('PARTICLE_DENSITY')
+                    particle_density = value
+                case ('PARTICLE_RADIUS_LARGE')
+                    particle_radius_large = value
+                case ('PARTICLE_RADIUS_SMALL')
+                    particle_radius_small = value
+                case ('CONTAINER_WIDTH')
+                    container_width = value
+                case ('PARTICLE_GEN_LAYERS')
+                    particle_gen_layers = int(value)
+                case ('RANDOM_SEED')
+                    random_seed = int(value)
+                case ('VALIDATION_MODE')
+                    validation_mode = (int(value) == 1)
+                case ('VALIDATION_PARTICLE1_X')
+                    validation_particle1_x = value
+                case ('VALIDATION_PARTICLE1_Z')
+                    validation_particle1_z = value
+                case ('VALIDATION_PARTICLE2_X')
+                    validation_particle2_x = value
+                case ('VALIDATION_PARTICLE2_Z')
+                    validation_particle2_z = value
+                case ('VALIDATION_PARTICLE1_VX')
+                    validation_particle1_vx = value
+                case ('VALIDATION_PARTICLE2_VX')
+                    validation_particle2_vx = value
+                case ('VALIDATION_PARTICLE_RADIUS')
+                    validation_particle_radius = value
+                case ('OUTPUT_INTERVAL_NORMAL')
+                    output_interval_normal = int(value)
+                case ('OUTPUT_INTERVAL_VALIDATION')
+                    output_interval_validation = int(value)
+                case ('MAX_CALCULATION_STEPS')
+                    max_calculation_steps = int(value)
+                case default
+                    write(*,*) '警告: 不明なキーワード: ', trim(keyword)
+            end select
+        end do
+        
+        close(unit_num)
+        
+        write(*,*) 'inputファイルの読み込み完了'
+        if (validation_mode) then
+            write(*,*) '検証モードで実行します'
+        else
+            write(*,*) '通常モードで実行します'
+        end if
+    end subroutine read_input_file
+
     !> 初期粒子配置と構成を設定するサブルーチン
     subroutine fposit_sub(rmax_out)
         use simulation_constants_mod, only: ni_max, PI_VAL
-        use simulation_parameters_mod, only: time_step, validation_mode
+        use simulation_parameters_mod
         use particle_data_mod, only: radius, x_coord, z_coord, rotation_angle
         use cell_system_mod ! モジュールからセルシステム関連変数を取得
         implicit none
@@ -288,7 +446,6 @@ contains
 
         integer :: i_layer, j_particle_in_layer, ipx_calc, current_particle_count
         real(8) :: r1_val, r2_val, rn_val, dx_offset, random_uniform_val
-        integer :: random_seed
         real(8) :: rmin_val ! 宣言をここに移動
         integer :: particles_this_row ! 宣言をここに移動
         
@@ -298,24 +455,25 @@ contains
         if (validation_mode) then
             num_particles = 2
 
-            ! 半径 (同じサイズで理論計算を簡単に)
-            radius(1) = 1.0d0
-            radius(2) = 1.0d0
+            ! 半径
+            radius(1) = validation_particle_radius
+            radius(2) = validation_particle_radius
 
-            ! 位置 (x方向に並べて配置 - 確実に接触するようにより近く)
-            x_coord(1) = 3.0d0
-            z_coord(1) = 3.0d0
-            x_coord(2) = 6.0d0 ! + 2.0d0 * radius(1) - 1.0d-6  ! わずかに重複させて配置
-            z_coord(2) = 3.0d0
+            ! 位置
+            x_coord(1) = validation_particle1_x
+            z_coord(1) = validation_particle1_z
+            x_coord(2) = validation_particle2_x
+            z_coord(2) = validation_particle2_z
 
             rotation_angle(1) = 0.0d0
             rotation_angle(2) = 0.0d0
 
-            rmax_out = radius(1)
-            rmin_val = radius(2)
+            rmax_out = validation_particle_radius
+            rmin_val = validation_particle_radius
 
-            container_width = 10.0d0  ! 容器幅を広げる
-            cell_size = 1.0d0  ! セルサイズを大きくして両方の粒子を同じセルに配置
+            ! 検証モード用のコンテナ設定
+            container_width = max(validation_particle1_x, validation_particle2_x) + 2.0d0 * validation_particle_radius
+            cell_size = validation_particle_radius * 2.0d0  ! セルサイズを大きくして両方の粒子を同じセルに配置
 
             cells_x_dir = idint(container_width / cell_size) + 1
             cells_z_dir = 5
@@ -332,15 +490,9 @@ contains
         ! 通常モード: ランダム配置による粒子生成
         ! -------------------------------------------------
 
-        random_seed = 584287 ! ii の初期値 (乱数シード)
-
-        ! 粒子半径 (元のコードからのサンプル値)
-        r1_val = 1.0d-2  ! 大きな粒子の半径
-        r2_val = 5.0d-3  ! 小さな粒子の半径
-
-        ! 容器の幅と粒子生成層数 (サンプル値)
-        container_width = 5.0d-1      ! w の設定
-        particle_gen_layers = 30      ! ipz の設定
+        ! 粒子半径 (inputファイルから取得)
+        r1_val = particle_radius_large
+        r2_val = particle_radius_small
 
         rmax_out = r1_val             ! 最大半径をr1_valとする
         rmin_val = r2_val             ! 最小半径をr2_valとする
@@ -526,9 +678,9 @@ contains
 
     !> 粒子iと壁との接触力を計算するサブルーチン
     subroutine wcont_sub(particle_idx)
-        use simulation_parameters_mod, only: time_step, validation_mode
+        use simulation_parameters_mod, only: time_step, validation_mode, container_width
         use particle_data_mod
-        use cell_system_mod, only: num_particles, container_width
+        use cell_system_mod, only: num_particles
         implicit none
         integer, intent(in) :: particle_idx ! 対象の粒子インデックス
 
@@ -1001,16 +1153,17 @@ contains
     !> グラフィック用データを出力するサブルーチン
     subroutine gfout_sub(iter_step, time_val, rmax_val)
         use simulation_constants_mod, only: nj_max
+        use simulation_parameters_mod, only: container_width
         use particle_data_mod
-        use cell_system_mod, only: num_particles, container_width
+        use cell_system_mod, only: num_particles
         implicit none
         integer, intent(in) :: iter_step    ! 現在のイテレーションステップ
         real(8), intent(in) :: time_val, rmax_val ! 現在時刻、最大粒子半径
         integer :: i,j
 
         if (iter_step == 1) then
-            open(unit=10, file='../data/graph11.d', status='replace', action='write')
-            open(unit=11, file='../data/graph21.d', status='replace', action='write')
+            open(unit=10, file='data/graph11.d', status='replace', action='write')
+            open(unit=11, file='data/graph21.d', status='replace', action='write')
         end if
         ! 初回以降は追記モードで開くか、性能が許せば開いたままにする。
         ! 簡単のため、ここでは毎回開く(replace)。元のコードはファイルを開きっぱなしにするか、適切に再オープン。
@@ -1019,6 +1172,7 @@ contains
         if (num_particles > 0) then
             write(10,'(1000(ES12.5,1X,ES12.5,1X,ES12.5,2X))') (sngl(x_coord(i)), sngl(z_coord(i)), sngl(radius(i)), i=1,num_particles)
             write(10,'(1000(ES12.5,1X,ES12.5,1X,ES12.5,2X))') (sngl(x_vel(i)), sngl(z_vel(i)), sngl(rotation_vel(i)), i=1,num_particles)
+            write(10,'(1000(ES12.5,2X))') (sngl(rotation_angle(i)), i=1,num_particles)
         end if
         
         ! 接触力の出力 (オプション、graph21.dより)
@@ -1052,7 +1206,7 @@ contains
            rmax_dummy_val = 0.0d0
         end if
 
-        open(unit=13, file='../data/backl.d', status='replace', action='write')
+        open(unit=13, file='data/backl.d', status='replace', action='write')
 
         write(13,*) num_particles, cells_x_dir, cells_z_dir, particle_gen_layers
         write(13,*) rmax_dummy_val, 0.0d0, container_width, cell_size, time_step ! current_timeではなく初期t=0を保存すると仮定

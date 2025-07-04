@@ -53,18 +53,25 @@ def read_simulation_data(filename: Union[str, Path] = DATA_FILE_DEFAULT):
                 if num_particles > 0:
                     particle_values = _read_floats(tokens, fh, particles_data_to_read)
 
+                # 速度データも同数だけ存在する。読み飛ばす。
+                velocity_values = []
+                if num_particles > 0:
+                    velocity_values = _read_floats(tokens, fh, particles_data_to_read)
+
+                # 回転角度データを読み込む
+                rotation_angles = []
+                if num_particles > 0:
+                    rotation_angles = _read_floats(tokens, fh, num_particles)
+
                 particles = [
                     {
                         "x": particle_values[i * 3 + 0],
                         "z": particle_values[i * 3 + 1],
                         "r": particle_values[i * 3 + 2],
+                        "rotation_angle": rotation_angles[i] if i < len(rotation_angles) else 0.0,
                     }
                     for i in range(num_particles)
                 ]
-
-                # 速度データも同数だけ存在する。読み飛ばす。
-                if num_particles > 0:
-                    _ = _read_floats(tokens, fh, particles_data_to_read)
 
                 frames_data.append(
                     {
@@ -133,8 +140,20 @@ def animate(frames_data, output_filename="pem_animation.gif"):
         ax.plot([current_container_width, current_container_width], [0, max_z_overall * 1.15], 'k-', lw=2) # 少し上まで線を引く
 
         for p_data in data['particles']:
-            circle = Circle((p_data['x'], p_data['z']), p_data['r'], alpha=0.7, color='blue') # 色を指定
+            circle = Circle((p_data['x'], p_data['z']), p_data['r'], facecolor='white', edgecolor='black', linewidth=1.5, alpha=0.9)
             ax.add_patch(circle)
+            
+            # 回転を示す線を描画
+            x_center = p_data['x']
+            z_center = p_data['z']
+            radius = p_data['r']
+            rotation_angle = p_data['rotation_angle']
+            
+            # 回転角度の方向に線を描画（0度は右方向、反時計回りが正）
+            x_end = x_center + radius * np.cos(rotation_angle)
+            z_end = z_center + radius * np.sin(rotation_angle)
+            
+            ax.plot([x_center, x_end], [z_center, z_end], 'k-', linewidth=1, alpha=0.8)
         
         time_text_obj.set_text(f"Time: {data['time']:.6f} s")
         ax.add_artist(time_text_obj) 
