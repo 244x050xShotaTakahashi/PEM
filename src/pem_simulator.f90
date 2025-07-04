@@ -34,6 +34,10 @@ module simulation_parameters_mod
     integer :: particle_gen_layers            ! ipz: 初期粒子生成層数
     integer :: random_seed                    ! 乱数シード
     
+    ! セル法アルゴリズム制御パラメータ
+    logical :: disable_cell_algorithm         ! セル法アルゴリズムを無効化するフラグ
+    real(8) :: cell_size_override            ! セルサイズの手動設定値 (0.0=自動計算)
+    
     ! 検証モード設定
     logical :: validation_mode                ! 検証モードフラグ
     real(8) :: validation_particle1_x        ! 検証モード: 粒子1のx座標
@@ -304,7 +308,27 @@ program two_dimensional_pem
     ! 計算時間計測終了
     call system_clock(end_time)
     elapsed_time = real(end_time - start_time) / real(clock_rate)
-    write(*,*) '計算時間: ', elapsed_time, ' 秒'
+    
+    write(*,*) '================================='
+    write(*,*) 'シミュレーション実行結果'
+    write(*,*) '================================='
+    write(*,*) '粒子数: ', num_particles
+    write(*,*) '計算ステップ数: ', it_step
+    write(*,*) '実行時間: ', elapsed_time, ' 秒'
+    write(*,*) '1ステップあたりの平均時間: ', elapsed_time / real(it_step), ' 秒'
+    
+    if (disable_cell_algorithm .or. cell_size_override > 0.0d0) then
+        write(*,*) 'セル法アルゴリズム: 無効化'
+        write(*,*) 'セルサイズ: ', cell_size
+    else
+        write(*,*) 'セル法アルゴリズム: 有効'
+        write(*,*) 'セルサイズ: ', cell_size
+        write(*,*) 'セル数 (X方向): ', cells_x_dir
+        write(*,*) 'セル数 (Z方向): ', cells_z_dir
+        write(*,*) '総セル数: ', cells_x_dir * cells_z_dir
+    end if
+    
+    write(*,*) '================================='
 
     stop
 contains
@@ -347,6 +371,8 @@ contains
         container_width = 5.0d-1
         particle_gen_layers = 30
         random_seed = 584287
+        disable_cell_algorithm = .false.
+        cell_size_override = 0.0d0
         validation_mode = .false.
         validation_particle1_x = 3.0d0
         validation_particle1_z = 3.0d0
@@ -397,6 +423,10 @@ contains
                     particle_gen_layers = int(value)
                 case ('RANDOM_SEED')
                     random_seed = int(value)
+                case ('DISABLE_CELL_ALGORITHM')
+                    disable_cell_algorithm = (int(value) == 1)
+                case ('CELL_SIZE_OVERRIDE')
+                    cell_size_override = value
                 case ('VALIDATION_MODE')
                     validation_mode = (int(value) == 1)
                 case ('VALIDATION_PARTICLE1_X')
@@ -536,11 +566,24 @@ contains
         write(*,*) '生成された粒子数: ', num_particles
 
         ! セルサイズ計算 (原文PDF p.35 eq 3.25: C < sqrt(2)*rmin)
-        if (rmin_val > 0.0d0) then
-             cell_size = rmin_val * 1.30d0 ! または入力から。原文ではrmin*1.35d0はコメントアウト
+        if (disable_cell_algorithm .or. cell_size_override > 0.0d0) then
+            ! セル法アルゴリズムを無効化する場合
+            if (cell_size_override > 0.0d0) then
+                cell_size = cell_size_override
+            else
+                ! 計算領域全体を1つのセルとして設定
+                cell_size = max(container_width, 2.0d0 * rmax_out * particle_gen_layers) * 2.0d0
+            end if
+            write(*,*) 'セル法アルゴリズムを無効化: cell_size = ', cell_size
         else
-             cell_size = rmax_out * 1.30d0 ! rminが適切に定義されない場合のフォールバック
+            ! 通常のセルサイズ計算
+            if (rmin_val > 0.0d0) then
+                 cell_size = rmin_val * 1.30d0 ! または入力から。原文ではrmin*1.35d0はコメントアウト
+            else
+                 cell_size = rmax_out * 1.30d0 ! rminが適切に定義されない場合のフォールバック
+            end if
         end if
+        
         if (cell_size <= 0.0d0) then
             write(*,*) "エラー: fposit_subでcell_sizeが正ではありません。"
             stop
