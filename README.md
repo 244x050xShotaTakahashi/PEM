@@ -18,6 +18,7 @@
 PEM/
 ├── src/
 │   └── pem_simulator.f90    # メインプログラム（Fortran90）
+│   └── animate_pem.py       # 可視化用プログラム (Python)
 ├── data/                    # シミュレーション結果出力
 ├── reference/               # 参考資料・理論値
 ├── pem_animation.gif        # シミュレーション結果のアニメーション
