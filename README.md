@@ -14,13 +14,15 @@
 
 ## ディレクトリ構造
 
+```
 PEM/
 ├── src/
-│ └── pem_simulator.f90 # メインプログラム（Fortran90）
-├── data/ # シミュレーション結果出力
-├── reference/ # 参考資料・理論値
-├── pem_animation.gif # シミュレーション結果のアニメーション
-└── README.md # このファイル
+│   └── pem_simulator.f90    # メインプログラム（Fortran90）
+├── data/                    # シミュレーション結果出力
+├── reference/               # 参考資料・理論値
+├── pem_animation.gif        # シミュレーション結果のアニメーション
+└── README.md               # このファイル
+```
 
 ## 🚀 使用方法
 
@@ -33,7 +35,7 @@ cd PEM/src
 ifort pem_simulator.f90 -o pem_simulator
 
 # または最適化オプション付き
-ifort -O3 -o pem_simulator src/pem_simulator.f90
+ifort -O3  pem_simulator.f90 -o pem_simulator 
 ```
 
 ### 実行
@@ -147,10 +149,6 @@ logical :: validation_mode = .false. ! 検証モードオフ
 ## 📞 サポート・連絡先
 
 質問やバグ報告は [GitHub Issues](https://github.com/244x050xShotaTakahashi/PEM/issues) までお願いします。
-
-## 📄 ライセンス
-
-このプロジェクトはMITライセンスの下で公開されています。
 
 ---
 
