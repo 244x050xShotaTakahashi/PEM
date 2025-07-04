@@ -1,0 +1,40 @@
+# PEMシミュレーション 通常モード用inputファイル
+# 粒状体の重力落下シミュレーションに使用されます
+
+# === シミュレーション制御パラメータ ===
+TIME_STEP                   5.0e-7      # 時間刻み [s]
+MAX_CALCULATION_STEPS       2000000     # 最大計算ステップ数
+
+# === 材料物性値 ===
+YOUNG_MODULUS_PARTICLE      4.9e9       # 粒子のヤング率 [Pa]
+YOUNG_MODULUS_WALL          3.9e9       # 壁のヤング率 [Pa]
+POISSON_RATIO_PARTICLE      0.23        # 粒子のポアソン比 [-]
+POISSON_RATIO_WALL          0.25        # 壁のポアソン比 [-]
+PARTICLE_DENSITY            2480.0      # 粒子の密度 [kg/m³]
+
+# === 摩擦係数 ===
+FRICTION_COEFF_PARTICLE     0.25        # 粒子間摩擦係数 [-]
+FRICTION_COEFF_WALL         0.17        # 壁-粒子間摩擦係数 [-]
+
+# === 検証モード設定 ===
+VALIDATION_MODE             0           # 検証モードを無効化 (1=ON, 0=OFF)
+
+# === 粒子生成パラメータ ===
+PARTICLE_RADIUS_LARGE       1.0e-2      # 大きな粒子の半径 [m]
+PARTICLE_RADIUS_SMALL       5.0e-3      # 小さな粒子の半径 [m]
+CONTAINER_WIDTH             0.5         # 容器の幅 [m]
+PARTICLE_GEN_LAYERS         30          # 初期粒子生成層数 [-]
+RANDOM_SEED                 584287      # 乱数シード [-]
+
+# === 検証モード設定 (通常モードでは使用されない) ===
+VALIDATION_PARTICLE_RADIUS  1.0         # 検証用粒子半径 [m]
+VALIDATION_PARTICLE1_X      3.0         # 粒子1のx座標 [m]
+VALIDATION_PARTICLE1_Z      3.0         # 粒子1のz座標 [m]
+VALIDATION_PARTICLE2_X      6.0         # 粒子2のx座標 [m]
+VALIDATION_PARTICLE2_Z      3.0         # 粒子2のz座標 [m]
+VALIDATION_PARTICLE1_VX     20.0        # 粒子1の初期x速度 [m/s]
+VALIDATION_PARTICLE2_VX     0.0         # 粒子2の初期x速度 [m/s]
+
+# === 出力制御パラメータ ===
+OUTPUT_INTERVAL_NORMAL      50000       # 通常モード出力間隔 [ステップ]
+OUTPUT_INTERVAL_VALIDATION  10          # 検証モード出力間隔 [ステップ] 
