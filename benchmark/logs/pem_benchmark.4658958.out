@@ -1,0 +1,48 @@
+================ Slrum Info ================
+DATE      = 2025-07-04T14:10:41+09:00
+PARTITION = gr20001a
+JOB_ID    = 4658958
+JOB_NAME  = pem_benchmark
+NNODES    = 1
+RSC_OPT   = p=1:t=4:c=4:m=16G
+============================================
+=================================
+PEM Algorithm Benchmark Job
+Start Time: Fri Jul  4 14:10:41 JST 2025
+=================================
+Compiling Fortran code...
+Compilation successful!
+=================================
+Running benchmark with CELL ALGORITHM ON
+=================================
+Start Time: Fri Jul  4 14:11:10 JST 2025
+End Time: Fri Jul  4 14:11:15 JST 2025
+Cell algorithm ON completed!
+=================================
+Running benchmark with CELL ALGORITHM OFF
+=================================
+Start Time: Fri Jul  4 14:11:15 JST 2025
+End Time: Fri Jul  4 14:11:25 JST 2025
+Cell algorithm OFF completed!
+=================================
+Extracting benchmark results...
+=================================
+Results Summary:
+----------------------------------------
+Cell Algorithm ON:
+  Particles: 179
+179
+  Execution Time: 5.093400 seconds
+  Steps: 100001
+
+Cell Algorithm OFF:
+  Particles: 141
+141
+  Execution Time: 9.998200 seconds
+  Steps: 50001
+
+Speed-up ratio: 1.962x
+Results also saved to: benchmark_summary.csv
+=================================
+Benchmark completed at Fri Jul  4 14:11:25 JST 2025
+=================================

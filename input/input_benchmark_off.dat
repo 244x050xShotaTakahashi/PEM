@@ -1,0 +1,35 @@
+# PEMシミュレーション アルゴリズム評価用inputファイル (セル法OFF)
+# セル法アルゴリズムを無効化して総当たり計算を実行
+
+# === シミュレーション制御パラメータ ===
+TIME_STEP                   5.0e-7      # 時間刻み [s]
+MAX_CALCULATION_STEPS       50000       # 最大計算ステップ数 (オフ時は計算時間が長いため短縮)
+
+# === 材料物性値 ===
+YOUNG_MODULUS_PARTICLE      4.9e9       # 粒子のヤング率 [Pa]
+YOUNG_MODULUS_WALL          3.9e9       # 壁のヤング率 [Pa]
+POISSON_RATIO_PARTICLE      0.23        # 粒子のポアソン比 [-]
+POISSON_RATIO_WALL          0.25        # 壁のポアソン比 [-]
+PARTICLE_DENSITY            2480.0      # 粒子の密度 [kg/m³]
+
+# === 摩擦係数 ===
+FRICTION_COEFF_PARTICLE     0.25        # 粒子間摩擦係数 [-]
+FRICTION_COEFF_WALL         0.17        # 壁-粒子間摩擦係数 [-]
+
+# === 検証モード設定 ===
+VALIDATION_MODE             0           # 検証モードを無効化 (1=ON, 0=OFF)
+
+# === 粒子生成パラメータ ===
+PARTICLE_RADIUS_LARGE       1.0e-2      # 大きな粒子の半径 [m]
+PARTICLE_RADIUS_SMALL       5.0e-3      # 小さな粒子の半径 [m]
+CONTAINER_WIDTH             0.5         # 容器の幅 [m]
+PARTICLE_GEN_LAYERS         8           # 初期粒子生成層数 (オフ時は少なく)
+RANDOM_SEED                 584287      # 乱数シード [-]
+
+# === セル法アルゴリズム制御パラメータ ===
+DISABLE_CELL_ALGORITHM      1           # セル法アルゴリズムを無効化 (1=OFF, 0=ON)
+CELL_SIZE_OVERRIDE          0.0         # セルサイズの手動設定 (0.0=自動計算)
+
+# === 出力制御パラメータ ===
+OUTPUT_INTERVAL_NORMAL      5000        # 通常モード出力間隔 [ステップ]
+OUTPUT_INTERVAL_VALIDATION  10          # 検証モード出力間隔 [ステップ] 

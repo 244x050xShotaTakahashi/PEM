@@ -1,0 +1,5 @@
+Particle_Layers,Particles,Algorithm,Time_seconds,Steps,Time_per_step
+4,74,ON,0.064800,5001,0.000012
+4,74,OFF,0.166100,5001,0.000033
+6,109,ON,0.095400,5001,0.000019
+6,109,OFF,0.316200,5001,0.000063
