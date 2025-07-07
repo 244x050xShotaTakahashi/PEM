@@ -1,0 +1,5 @@
+Algorithm,Particles,Time_seconds,Steps,Time_per_step
+ON,179
+179,5.093400,100001,0.000050
+OFF,141
+141,9.998200,50001,0.000199

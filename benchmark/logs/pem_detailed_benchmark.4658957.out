@@ -1,0 +1,71 @@
+================ Slrum Info ================
+DATE      = 2025-07-04T14:10:35+09:00
+PARTITION = gr20001a
+JOB_ID    = 4658957
+JOB_NAME  = pem_detailed_benchmark
+NNODES    = 1
+RSC_OPT   = p=1:t=8:c=8:m=32G
+============================================
+=================================
+PEM Detailed Algorithm Benchmark
+Start Time: Fri Jul  4 14:10:35 JST 2025
+=================================
+Compiling Fortran code...
+Compilation successful!
+=================================
+Testing with 4 layers
+=================================
+Running with Cell Algorithm ON (4 layers)...
+Running with Cell Algorithm OFF (4 layers)...
+Speedup for 4 layers: 2.78x
+Completed 4 layers test
+=================================
+Testing with 6 layers
+=================================
+Running with Cell Algorithm ON (6 layers)...
+Running with Cell Algorithm OFF (6 layers)...
+Speedup for 6 layers: 3.94x
+Completed 6 layers test
+=================================
+Testing with 8 layers
+=================================
+Running with Cell Algorithm ON (8 layers)...
+Running with Cell Algorithm OFF (8 layers)...
+Speedup for 8 layers: 5.04x
+Completed 8 layers test
+=================================
+Testing with 10 layers
+=================================
+Running with Cell Algorithm ON (10 layers)...
+Skipping Cell Algorithm OFF for 10 layers (too many particles)
+Completed 10 layers test
+=================================
+Testing with 12 layers
+=================================
+Running with Cell Algorithm ON (12 layers)...
+Skipping Cell Algorithm OFF for 12 layers (too many particles)
+Completed 12 layers test
+=================================
+Benchmark Results Summary
+=================================
+Particle_Layers,Particles,Algorithm,Time_seconds,Steps,Time_per_step
+4,74
+74,ON,0.659900,30001,0.000021
+4,74
+74,OFF,1.835700,30001,0.000061
+6,109
+109,ON,0.944700,30001,0.000031
+6,109
+109,OFF,3.722300,30001,0.000124
+8,141
+141,ON,1.202800,30001,0.000040
+8,141
+141,OFF,6.067700,30001,0.000202
+10,179
+179,ON,1.553700,30001,0.000051
+12,214
+214,ON,1.899100,30001,0.000063
+=================================
+Detailed benchmark completed at Fri Jul  4 14:10:57 JST 2025
+Results saved to: benchmark_results.csv
+=================================

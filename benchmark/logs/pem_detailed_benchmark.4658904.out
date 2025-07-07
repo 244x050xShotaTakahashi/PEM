@@ -1,0 +1,71 @@
+================ Slrum Info ================
+DATE      = 2025-07-04T13:47:17+09:00
+PARTITION = gr20001a
+JOB_ID    = 4658904
+JOB_NAME  = pem_detailed_benchmark
+NNODES    = 1
+RSC_OPT   = p=1:t=8:c=8:m=32G
+============================================
+=================================
+PEM Detailed Algorithm Benchmark
+Start Time: Fri Jul  4 13:47:17 JST 2025
+=================================
+Compiling Fortran code...
+Compilation successful!
+=================================
+Testing with 4 layers
+=================================
+Running with Cell Algorithm ON (4 layers)...
+Running with Cell Algorithm OFF (4 layers)...
+Speedup for 4 layers: 2.58x
+Completed 4 layers test
+=================================
+Testing with 6 layers
+=================================
+Running with Cell Algorithm ON (6 layers)...
+Running with Cell Algorithm OFF (6 layers)...
+Speedup for 6 layers: 3.96x
+Completed 6 layers test
+=================================
+Testing with 8 layers
+=================================
+Running with Cell Algorithm ON (8 layers)...
+Running with Cell Algorithm OFF (8 layers)...
+Speedup for 8 layers: 5.01x
+Completed 8 layers test
+=================================
+Testing with 10 layers
+=================================
+Running with Cell Algorithm ON (10 layers)...
+Skipping Cell Algorithm OFF for 10 layers (too many particles)
+Completed 10 layers test
+=================================
+Testing with 12 layers
+=================================
+Running with Cell Algorithm ON (12 layers)...
+Skipping Cell Algorithm OFF for 12 layers (too many particles)
+Completed 12 layers test
+=================================
+Benchmark Results Summary
+=================================
+Particle_Layers,Particles,Algorithm,Time_seconds,Steps,Time_per_step
+4,74
+74,ON,0.717100024223328,30001,.00002390
+4,74
+74,OFF,1.85119998455048,30001,.00006170
+6,109
+109,ON,0.938199996948242,30001,.00003127
+6,109
+109,OFF,3.72320008277893,30001,.00012410
+8,141
+141,ON,1.20570003986359,30001,.00004018
+8,141
+141,OFF,6.05109977722168,30001,.00020169
+10,179
+179,ON,1.54830002784729,30001,.00005160
+12,214
+214,ON,1.87479996681213,30001,.00006249
+=================================
+Detailed benchmark completed at Fri Jul  4 13:47:38 JST 2025
+Results saved to: benchmark_results.csv
+=================================
