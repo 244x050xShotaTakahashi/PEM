@@ -1,0 +1,38 @@
+# PEM安息角解析テスト用入力ファイル
+# 少ない粒子数で短時間テスト
+
+# 基本パラメータ
+TIME_STEP               1.0e-7      # 時間刻み[s]（より小さく）
+MAX_CALCULATION_STEPS   10000       # 最大計算ステップ数（短いテスト）
+
+# 材料物性
+PARTICLE_DENSITY        2650        # 粒子密度[kg/m³] (砂)
+FRICTION_COEFF_PARTICLE 0.5         # 粒子間摩擦係数
+FRICTION_COEFF_WALL     0.4         # 壁-粒子間摩擦係数
+YOUNG_MODULUS_PARTICLE  1.0e7       # 粒子のヤング率[Pa]（より柔らかく）
+YOUNG_MODULUS_WALL      2.0e11      # 壁のヤング率[Pa]
+POISSON_RATIO_PARTICLE  0.3         # 粒子のポアソン比
+POISSON_RATIO_WALL      0.3         # 壁のポアソン比
+
+# 粒子サイズ
+PARTICLE_RADIUS_LARGE   0.002       # 大粒子半径[m] (2mm)
+PARTICLE_RADIUS_SMALL   0.001       # 小粒子半径[m] (1mm)
+
+# 安息角解析モード設定
+ANGLE_OF_REPOSE_MODE    1           # 安息角解析モード有効
+HOPPER_OPENING_WIDTH    0.05        # ホッパー開口幅[m] (50mm) - より広く
+HOPPER_HEIGHT           0.10        # ホッパー高さ[m]
+HOPPER_ANGLE            45          # ホッパー角度[度]
+DROP_HEIGHT             0.15        # 落下開始高さ[m]
+TOTAL_DROP_PARTICLES    50          # 落下粒子総数（減らして安定性確認）
+DROP_INTERVAL_STEPS     100         # 落下間隔[ステップ]
+BASE_PLATE_WIDTH        0.4         # 底板幅[m]（広め）
+TARGET_ANGLE_OF_REPOSE  32          # 目標安息角[度]
+MEASURE_ANGLE_CONTINUOUSLY 1        # 連続的に角度測定
+
+# 出力設定
+OUTPUT_INTERVAL_NORMAL  5000        # 通常出力間隔
+
+# その他
+RANDOM_SEED             12345       # 乱数シード
+DISABLE_CELL_ALGORITHM  0           # セル法使用 

@@ -1,0 +1,45 @@
+# PEMシミュレーション 安息角解析用inputファイル
+# 安息角解析モードを使用して粒子を落下させ、形成される山の角度を測定します
+
+# === シミュレーション制御パラメータ ===
+TIME_STEP                   1.0e-6      # 時間刻み [s] (安定性のため少し大きめ)
+MAX_CALCULATION_STEPS       5000000     # 最大計算ステップ数
+
+# === 材料物性値 ===
+YOUNG_MODULUS_PARTICLE      2.0e7       # 粒子のヤング率 [Pa] (砂粒を想定)
+YOUNG_MODULUS_WALL          2.0e11      # 壁のヤング率 [Pa] (鋼材を想定)
+POISSON_RATIO_PARTICLE      0.3         # 粒子のポアソン比 [-]
+POISSON_RATIO_WALL          0.3         # 壁のポアソン比 [-]
+PARTICLE_DENSITY            2650.0      # 粒子の密度 [kg/m³] (石英砂を想定)
+
+# === 摩擦係数 ===
+FRICTION_COEFF_PARTICLE     0.5         # 粒子間摩擦係数 [-] (砂の典型値)
+FRICTION_COEFF_WALL         0.4         # 壁-粒子間摩擦係数 [-]
+
+# === 安息角解析モード設定 ===
+ANGLE_OF_REPOSE_MODE        1           # 安息角解析モードを有効化 (1=ON, 0=OFF)
+HOPPER_OPENING_WIDTH        0.02        # ホッパー開口部の幅 [m]
+HOPPER_HEIGHT               0.15        # ホッパーの高さ [m]
+HOPPER_ANGLE                45.0        # ホッパーの傾斜角度 [度]
+DROP_HEIGHT                 0.20        # 粒子落下開始高さ [m]
+TOTAL_DROP_PARTICLES        500         # 落下させる総粒子数 [-]
+DROP_INTERVAL_STEPS         200         # 粒子落下間隔 [ステップ]
+TARGET_ANGLE_OF_REPOSE      32.0        # 目標安息角（実験値）[度]
+BASE_PLATE_WIDTH            0.3         # 底板の幅 [m]
+MEASURE_ANGLE_CONTINUOUSLY  1           # 連続的に角度を測定 (1=ON, 0=OFF)
+
+# === 粒子生成パラメータ ===
+PARTICLE_RADIUS_LARGE       0.002       # 大きな粒子の半径 [m] (2mm)
+PARTICLE_RADIUS_SMALL       0.001       # 小さな粒子の半径 [m] (1mm)
+CONTAINER_WIDTH             0.3         # 容器の幅 [m]
+PARTICLE_GEN_LAYERS         1           # 初期粒子生成層数 (安息角モードでは使用しない)
+RANDOM_SEED                 12345       # 乱数シード [-]
+
+# === 出力制御パラメータ ===
+OUTPUT_INTERVAL_NORMAL      10000       # 出力間隔 [ステップ]
+OUTPUT_INTERVAL_VALIDATION  10          # 検証モード出力間隔 [ステップ] (未使用)
+
+# === その他の設定 ===
+VALIDATION_MODE             0           # 検証モードを無効化 (1=ON, 0=OFF)
+DISABLE_CELL_ALGORITHM      0           # セル法アルゴリズムを有効化 (0=ON, 1=OFF)
+CELL_SIZE_OVERRIDE          0.0         # セルサイズ自動計算 (0.0=自動) 
