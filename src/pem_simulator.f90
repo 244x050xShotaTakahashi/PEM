@@ -53,6 +53,23 @@ module simulation_parameters_mod
     integer :: output_interval_validation     ! 検証モード出力間隔
     integer :: max_calculation_steps          ! 最大計算ステップ数
 
+    ! 粒子-壁間検証モード設定
+    logical :: wall_validation_mode           ! 粒子-壁間検証モードフラグ
+    integer :: wall_validation_type           ! 検証タイプ (1: 自由落下反発, 2: 摩擦斜面)
+    real(8) :: wall_validation_drop_height    ! 落下開始高さ
+    real(8) :: wall_validation_particle_radius ! 検証用粒子半径
+    real(8) :: wall_validation_particle_x     ! 検証用粒子のx座標
+    real(8) :: wall_validation_restitution_coeff ! 理論計算用反発係数
+    real(8) :: wall_validation_friction_coeff    ! 理論計算用摩擦係数
+    real(8) :: wall_validation_slope_angle      ! 斜面角度（ラジアン）
+    real(8) :: wall_validation_slope_friction   ! 斜面摩擦係数
+    
+    ! パラメータ掃引設定
+    logical :: parameter_sweep_mode           ! パラメータ掃引モードフラグ
+    integer :: parameter_sweep_count          ! 掃引回数
+    real(8) :: restitution_coeff_min          ! 反発係数の最小値
+    real(8) :: restitution_coeff_max          ! 反発係数の最大値
+
     save
 end module simulation_parameters_mod
 
@@ -142,12 +159,35 @@ program two_dimensional_pem
     real(8) :: dist, sumr                    ! 接触判定用
     real(8) :: m1, m2, e_coeff, v1_theo, v2_theo, err1, err2 ! 評価用
     real(8) :: ke_initial, ke_final, ke_theo ! エネルギー保存チェック用
+    
+    ! --- ▼ 粒子-壁間検証用追加変数 ▼ ---
+    logical :: wall_collision_started = .false.  ! 壁衝突が開始したか
+    logical :: wall_collision_finished = .false. ! 壁衝突が終了したか
+    logical :: particle_falling = .true.         ! 粒子が落下中か
+    logical :: particle_rising = .false.         ! 粒子が上昇中か
+    real(8) :: initial_drop_height              ! 初期落下高さ
+    real(8) :: pre_collision_velocity           ! 衝突直前の速度
+    real(8) :: post_collision_velocity          ! 衝突直後の速度
+    real(8) :: max_rebound_height               ! 最大反発高さ
+    real(8) :: theoretical_rebound_height       ! 理論的反発高さ
+    real(8) :: height_error                     ! 高さの誤差
+    
+    ! 摩擦斜面検証用変数
+    real(8) :: theoretical_velocity, theoretical_position
+    real(8) :: actual_velocity, actual_position
+    real(8) :: velocity_error, position_error
 
     ! 計算時間計測開始
     call system_clock(start_time, clock_rate)
     
     ! inputファイルからパラメータを読み込み
     call read_input_file
+    
+    ! パラメータ掃引モードかどうかの判定と実行
+    if (parameter_sweep_mode .and. wall_validation_mode .and. wall_validation_type == 1) then
+        call parameter_sweep_validation
+        stop
+    end if
     
     ! 初期位置と初期条件の設定
     call fposit_sub(rmax_particle_radius)
@@ -171,6 +211,41 @@ program two_dimensional_pem
         ! 摩擦を無効化
         friction_coeff_particle = 0.0d0
         friction_coeff_wall     = 0.0d0
+    end if
+
+    ! -----------------------------------------------
+    ! 粒子-壁間検証モードの場合：初期速度と摩擦係数を設定
+    ! -----------------------------------------------
+    if (wall_validation_mode) then
+        if (wall_validation_type == 1) then
+            ! 自由落下反発検証: 初速ゼロ、重力あり
+            x_vel(1) = 0.0d0
+            z_vel(1) = 0.0d0
+            rotation_vel(1) = 0.0d0
+            ! 摩擦を無効化してエネルギー保存に集中
+            friction_coeff_particle = 0.0d0
+            friction_coeff_wall = 0.0d0
+        else if (wall_validation_type == 2) then
+            ! 摩擦斜面検証: 初速ゼロ、重力あり、摩擦あり
+            x_vel(1) = 0.0d0
+            z_vel(1) = 0.0d0
+            rotation_vel(1) = 0.0d0
+            ! 指定された摩擦係数を使用
+            friction_coeff_particle = wall_validation_friction_coeff
+            friction_coeff_wall = wall_validation_slope_friction
+        end if
+    end if
+
+    ! -----------------------------------------------
+    ! 粒子-壁間検証モードの初期設定
+    ! -----------------------------------------------
+    if (wall_validation_mode .and. wall_validation_type == 1) then
+        initial_drop_height = wall_validation_drop_height
+        theoretical_rebound_height = wall_validation_restitution_coeff**2 * initial_drop_height
+        write(*,*) '自由落下反発検証パラメータ:'
+        write(*,*) '  初期落下高さ: ', initial_drop_height
+        write(*,*) '  反発係数: ', wall_validation_restitution_coeff
+        write(*,*) '  理論反発高さ: ', theoretical_rebound_height
     end if
 
     current_time = 0.0d0
@@ -269,6 +344,82 @@ program two_dimensional_pem
             end if
         end if
 
+        ! === ▼ 粒子-壁間検証ロジック ▼ ===
+        if (wall_validation_mode .and. wall_validation_type == 1 .and. .not. wall_collision_finished) then
+            ! 自由落下反発検証
+            if (particle_falling .and. z_coord(1) <= radius(1) + 1.0d-6) then
+                ! 床に衝突
+                wall_collision_started = .true.
+                pre_collision_velocity = abs(z_vel(1))
+                write(*,*) '床衝突検出: 時刻 = ', current_time
+                write(*,*) '衝突直前速度: ', pre_collision_velocity
+            else if (wall_collision_started .and. particle_falling .and. z_coord(1) > radius(1) + 1.0d-3) then
+                ! 床から離れた（反発開始）
+                particle_falling = .false.
+                particle_rising = .true.
+                write(*,*) '床から離脱: 時刻 = ', current_time, ', 位置 = ', z_coord(1)
+            else if (particle_rising .and. z_vel(1) < 0.0d0) then
+                ! 上昇から落下に転じた（最高点到達）
+                particle_rising = .false.
+                particle_falling = .true.
+                max_rebound_height = z_coord(1)
+                wall_collision_finished = .true.
+                
+                ! 理論値との比較
+                height_error = abs(max_rebound_height - theoretical_rebound_height) / theoretical_rebound_height * 100.0d0
+                
+                write(*,*) '最高点検出: 時刻 = ', current_time, ', 位置 = ', z_coord(1), ', 速度 = ', z_vel(1)
+                write(*,*) '================================='
+                write(*,*) '自由落下反発検証結果'
+                write(*,*) '================================='
+                write(*,*) '初期落下高さ: ', initial_drop_height
+                write(*,*) '反発係数: ', wall_validation_restitution_coeff
+                write(*,*) '理論反発高さ: ', theoretical_rebound_height
+                write(*,*) '計算反発高さ: ', max_rebound_height
+                write(*,*) '相対誤差: ', height_error, '%'
+                                    write(*,*) '================================='
+                    
+                    exit  ! シミュレーションループを抜ける
+            end if
+        else if (wall_validation_mode .and. wall_validation_type == 2 .and. .not. wall_collision_finished) then
+            ! 摩擦斜面検証
+            if (it_step == 1) then
+                ! 初期状態の記録
+                initial_drop_height = z_coord(1)
+                write(*,*) '摩擦斜面検証パラメータ:'
+                write(*,*) '  初期位置: x=', x_coord(1), ', z=', z_coord(1)
+                write(*,*) '  斜面角度: ', wall_validation_slope_angle, ' ラジアン'
+                write(*,*) '  摩擦係数: ', wall_validation_slope_friction
+                write(*,*) '  理論加速度: ', GRAVITY_ACCEL * (sin(wall_validation_slope_angle) - wall_validation_slope_friction * cos(wall_validation_slope_angle))
+            end if
+            
+            if (it_step == 5000) then
+                ! 一定時間後の理論値との比較
+                theoretical_velocity = GRAVITY_ACCEL * (sin(wall_validation_slope_angle) - wall_validation_slope_friction * cos(wall_validation_slope_angle)) * current_time
+                theoretical_position = wall_validation_particle_x + 0.5d0 * GRAVITY_ACCEL * (sin(wall_validation_slope_angle) - wall_validation_slope_friction * cos(wall_validation_slope_angle)) * current_time**2
+                
+                actual_velocity = sqrt(x_vel(1)**2 + z_vel(1)**2)
+                actual_position = x_coord(1)
+                
+                velocity_error = abs(actual_velocity - theoretical_velocity) / theoretical_velocity * 100.0d0
+                position_error = abs(actual_position - theoretical_position) / theoretical_position * 100.0d0
+                
+                write(*,*) '================================='
+                write(*,*) '摩擦斜面検証結果'
+                write(*,*) '================================='
+                write(*,*) '時刻: ', current_time
+                write(*,*) '理論速度: ', theoretical_velocity
+                write(*,*) '計算速度: ', actual_velocity
+                write(*,*) '速度誤差: ', velocity_error, '%'
+                write(*,*) '理論位置: ', theoretical_position
+                write(*,*) '計算位置: ', actual_position
+                write(*,*) '位置誤差: ', position_error, '%'
+                write(*,*) '================================='
+                
+                wall_collision_finished = .true.
+            end if
+        end if
+
         ! 静止状態の判定
         if (static_judge_flag == 1) then
             write(*,*) '静止状態に到達しました。時刻: ', current_time
@@ -277,13 +428,20 @@ program two_dimensional_pem
 
         ! 計算状況の出力
         if (mod(it_step, 100) == 0) then
-            write(*, '(A,F10.6,A,F12.6,A,F12.6)') 'Time= ', current_time, &
-                                                 ' Z0(N)= ', z_coord(num_particles), &
-                                                 ' V0(N)= ', z_vel(num_particles)
+            if (wall_validation_mode .and. wall_validation_type == 1) then
+                write(*, '(A,F10.6,A,F12.6,A,F12.6,A,L1)') 'Time= ', current_time, &
+                                                     ' Z0(1)= ', z_coord(1), &
+                                                     ' V0(1)= ', z_vel(1), &
+                                                     ' Falling= ', particle_falling
+            else
+                write(*, '(A,F10.6,A,F12.6,A,F12.6)') 'Time= ', current_time, &
+                                                     ' Z0(N)= ', z_coord(num_particles), &
+                                                     ' V0(N)= ', z_vel(num_particles)
+            end if
         end if
 
         ! グラフィック用データの出力
-        if (validation_mode) then
+        if (validation_mode .or. wall_validation_mode) then
             ! 検証モードでは指定間隔で出力
             if (it_step == 1 .or. mod(it_step, output_interval_validation) == 0) then
                 call gfout_sub(it_step, current_time, rmax_particle_radius)
@@ -344,8 +502,12 @@ contains
         ! inputファイル名の決定（コマンドライン引数または固定名）
         if (command_argument_count() > 0) then
             call get_command_argument(1, input_filename)
+            ! 相対パスの場合、inputフォルダを追加
+            if (input_filename(1:1) /= '/' .and. input_filename(1:5) /= 'input') then
+                input_filename = 'input/' // trim(input_filename)
+            end if
         else
-            input_filename = "input.dat"
+            input_filename = "input/input.dat"
         end if
         
         write(*,*) 'inputファイルを読み込み中: ', trim(input_filename)
@@ -384,6 +546,23 @@ contains
         output_interval_normal = 50000
         output_interval_validation = 10
         max_calculation_steps = 2000000
+        
+        ! 粒子-壁間検証モードのデフォルト値
+        wall_validation_mode = .false.
+        wall_validation_type = 1
+        wall_validation_drop_height = 10.0d0
+        wall_validation_particle_radius = 1.0d0
+        wall_validation_particle_x = 5.0d0
+        wall_validation_restitution_coeff = 0.8d0
+        wall_validation_friction_coeff = 0.3d0
+        wall_validation_slope_angle = 0.52359877559d0  ! 30度をラジアンに変換
+        wall_validation_slope_friction = 0.3d0
+        
+        ! パラメータ掃引モードのデフォルト値
+        parameter_sweep_mode = .false.
+        parameter_sweep_count = 5
+        restitution_coeff_min = 0.2d0
+        restitution_coeff_max = 0.9d0
         
         do
             read(unit_num, '(A)', iostat=ios) line
@@ -449,6 +628,32 @@ contains
                     output_interval_validation = int(value)
                 case ('MAX_CALCULATION_STEPS')
                     max_calculation_steps = int(value)
+                case ('WALL_VALIDATION_MODE')
+                    wall_validation_mode = (int(value) == 1)
+                case ('WALL_VALIDATION_TYPE')
+                    wall_validation_type = int(value)
+                case ('WALL_VALIDATION_DROP_HEIGHT')
+                    wall_validation_drop_height = value
+                case ('WALL_VALIDATION_PARTICLE_RADIUS')
+                    wall_validation_particle_radius = value
+                case ('WALL_VALIDATION_PARTICLE_X')
+                    wall_validation_particle_x = value
+                case ('WALL_VALIDATION_RESTITUTION_COEFF')
+                    wall_validation_restitution_coeff = value
+                case ('WALL_VALIDATION_FRICTION_COEFF')
+                    wall_validation_friction_coeff = value
+                case ('WALL_VALIDATION_SLOPE_ANGLE')
+                    wall_validation_slope_angle = value
+                case ('WALL_VALIDATION_SLOPE_FRICTION')
+                    wall_validation_slope_friction = value
+                case ('PARAMETER_SWEEP_MODE')
+                    parameter_sweep_mode = (int(value) == 1)
+                case ('PARAMETER_SWEEP_COUNT')
+                    parameter_sweep_count = int(value)
+                case ('RESTITUTION_COEFF_MIN')
+                    restitution_coeff_min = value
+                case ('RESTITUTION_COEFF_MAX')
+                    restitution_coeff_max = value
                 case default
                     write(*,*) '警告: 不明なキーワード: ', trim(keyword)
             end select
@@ -458,7 +663,14 @@ contains
         
         write(*,*) 'inputファイルの読み込み完了'
         if (validation_mode) then
-            write(*,*) '検証モードで実行します'
+            write(*,*) '粒子間衝突検証モードで実行します'
+        else if (wall_validation_mode) then
+            write(*,*) '粒子-壁間検証モードで実行します'
+            if (wall_validation_type == 1) then
+                write(*,*) '検証タイプ: 自由落下反発'
+            else if (wall_validation_type == 2) then
+                write(*,*) '検証タイプ: 摩擦斜面'
+            end if
         else
             write(*,*) '通常モードで実行します'
         end if
@@ -510,6 +722,45 @@ contains
 
             if (cells_x_dir * cells_z_dir > nc_max) then
                 write(*,*) 'セル数がnc_maxを超えています (検証モード)'
+                stop 'fposit_sub: セル配列が小さすぎます'
+            end if
+
+            return
+        end if
+
+        ! -------------------------------------------------
+        ! 粒子-壁間検証モード: 1粒子を手動配置
+        ! -------------------------------------------------
+        if (wall_validation_mode) then
+            num_particles = 1
+
+            ! 半径
+            radius(1) = wall_validation_particle_radius
+
+            ! 位置
+            x_coord(1) = wall_validation_particle_x
+            if (wall_validation_type == 1) then
+                ! 自由落下反発検証: 指定された高さから落下
+                z_coord(1) = wall_validation_drop_height
+            else if (wall_validation_type == 2) then
+                ! 摩擦斜面検証: 斜面上に配置
+                z_coord(1) = wall_validation_drop_height
+            end if
+
+            rotation_angle(1) = 0.0d0
+
+            rmax_out = wall_validation_particle_radius
+            rmin_val = wall_validation_particle_radius
+
+            ! 粒子-壁間検証モード用のコンテナ設定
+            container_width = max(wall_validation_particle_x * 2.0d0, 10.0d0)
+            cell_size = wall_validation_particle_radius * 2.0d0
+
+            cells_x_dir = idint(container_width / cell_size) + 1
+            cells_z_dir = idint((wall_validation_drop_height * 2.0d0) / cell_size) + 10
+
+            if (cells_x_dir * cells_z_dir > nc_max) then
+                write(*,*) 'セル数がnc_maxを超えています (粒子-壁間検証モード)'
                 stop 'fposit_sub: セル配列が小さすぎます'
             end if
 
@@ -730,6 +981,7 @@ contains
         real(8) :: xi, zi, ri_particle
         real(8) :: wall_angle_sin, wall_angle_cos, overlap_gap
         integer :: wall_contact_slot_idx, wall_partner_id
+        real(8) :: slope_distance, slope_normal_x, slope_normal_z ! 斜面壁用変数
 
         xi = x_coord(particle_idx)
         zi = z_coord(particle_idx)
@@ -745,6 +997,8 @@ contains
             contact_partner_idx(particle_idx, wall_contact_slot_idx) = wall_partner_id
             if (validation_mode) then
                 call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 1.0d0, 1.0d0)
+            else if (wall_validation_mode) then
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, wall_validation_restitution_coeff, wall_validation_restitution_coeff)
             else
                 call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 0.5d0, 0.5d0)
             end if
@@ -764,6 +1018,12 @@ contains
             contact_partner_idx(particle_idx, wall_contact_slot_idx) = wall_partner_id
             if (validation_mode) then
                 call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 1.0d0, 1.0d0)
+            else if (wall_validation_mode) then
+                ! デバッグ出力
+                if (overlap_gap > 1.0d-6) then
+                    write(*,*) 'DEBUG: 下壁接触 - 粒子:', particle_idx, ', 重なり:', overlap_gap, ', 反発係数:', wall_validation_restitution_coeff
+                end if
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, wall_validation_restitution_coeff, wall_validation_restitution_coeff)
             else
                 call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 0.5d0, 0.5d0)
             end if
@@ -783,6 +1043,8 @@ contains
             contact_partner_idx(particle_idx, wall_contact_slot_idx) = wall_partner_id
             if (validation_mode) then
                 call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 1.0d0, 1.0d0)
+            else if (wall_validation_mode) then
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, wall_validation_restitution_coeff, wall_validation_restitution_coeff)
             else
                 call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 0.5d0, 0.5d0)
             end if
@@ -790,6 +1052,30 @@ contains
             normal_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
             shear_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
             contact_partner_idx(particle_idx, wall_contact_slot_idx) = 0
+        end if
+        
+        ! 斜面壁 (摩擦斜面検証用) (contact_partner_idx = num_particles + 4)
+        if (wall_validation_mode .and. wall_validation_type == 2) then
+            wall_contact_slot_idx = 10 ! 斜面壁用の固定スロット
+            wall_partner_id = num_particles + 4
+            
+            ! 斜面方程式: z = tan(angle) * x + 0 (原点を通る斜面)
+            ! 粒子中心から斜面への距離
+            slope_normal_x = -sin(wall_validation_slope_angle)
+            slope_normal_z = cos(wall_validation_slope_angle)
+            slope_distance = slope_normal_x * xi + slope_normal_z * zi
+            
+            if (slope_distance < ri_particle) then ! 斜面と接触
+                wall_angle_sin = slope_normal_z
+                wall_angle_cos = slope_normal_x
+                overlap_gap = ri_particle - slope_distance
+                contact_partner_idx(particle_idx, wall_contact_slot_idx) = wall_partner_id
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, wall_validation_restitution_coeff, wall_validation_restitution_coeff)
+            else                                    ! 接触なし
+                normal_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
+                shear_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
+                contact_partner_idx(particle_idx, wall_contact_slot_idx) = 0
+            end if
         end if
     end subroutine wcont_sub
 
@@ -964,6 +1250,8 @@ contains
 
         if (validation_mode) then
             grav = 0.0d0
+        else if (wall_validation_mode) then
+            grav = GRAVITY_ACCEL
         else
             grav = GRAVITY_ACCEL
         end if
@@ -1101,8 +1389,8 @@ contains
         if (kn_normal_stiffness > 1.0d-12) then
            critical_time_step_check = 0.1d0 * sqrt(effective_mass / kn_normal_stiffness)
            if (critical_time_step_check < time_step .and. critical_time_step_check > 1.0d-12) then 
-                ! write(*,*) '安定性チェック: ddt_checkがtime_stepより小さい可能性 粒子 ', p_i, p_j
-                ! write(*,*) 'ddt_check =', critical_time_step_check, ' Kn=', kn_normal_stiffness, ' M_eff=', effective_mass
+                write(*,*) '警告: 安定性基準違反 - 推奨時間刻み:', critical_time_step_check, '現在:', time_step
+                write(*,*) '  Kn=', kn_normal_stiffness, ' M_eff=', effective_mass, ' 粒子:', p_i, p_j
            end if
         end if
 
@@ -1115,16 +1403,10 @@ contains
                                (ri_val * rot_disp_incr_pi + rj_val * rot_disp_incr_pj)
 
 
-        ! 初期接触の処理: 新規接触の場合、法線変位に基づいてせん断変位をスケーリング
+        ! 弾性力成分の更新 (式3.7, 3.10)
         if (abs(normal_force_contact(p_i, contact_slot_idx_for_pi)) < 1.0d-8) then ! 新規接触
             ! 新規接触の場合、弾性力を重なり量に基づいて初期化
-            if (validation_mode) then
-                ! 検証モードでは線形ばねモデルを使用
-                normal_force_contact(p_i, contact_slot_idx_for_pi) = kn_normal_stiffness * initial_overlap
-            else
-                ! 通常モードではHertzモデル
-                normal_force_contact(p_i, contact_slot_idx_for_pi) = kn_normal_stiffness * initial_overlap
-            end if
+            normal_force_contact(p_i, contact_slot_idx_for_pi) = kn_normal_stiffness * initial_overlap
             shear_force_contact(p_i, contact_slot_idx_for_pi) = 0.0d0 ! せん断力は初期化時にゼロ
         else
             ! 既存接触の場合、増分で更新
@@ -1133,12 +1415,6 @@ contains
             shear_force_contact(p_i, contact_slot_idx_for_pi) = shear_force_contact(p_i, contact_slot_idx_for_pi) + &
                                                                 ks_shear_stiffness * rel_disp_shear_incr
         end if
-
-        ! 弾性力成分の更新 (式3.7, 3.10)
-        normal_force_contact(p_i, contact_slot_idx_for_pi) = normal_force_contact(p_i, contact_slot_idx_for_pi) + &
-                                                             kn_normal_stiffness * rel_disp_normal_incr
-        shear_force_contact(p_i, contact_slot_idx_for_pi) = shear_force_contact(p_i, contact_slot_idx_for_pi) + &
-                                                            ks_shear_stiffness * rel_disp_shear_incr
         
         ! 粘性抵抗力成分の計算 (式3.6, 3.9)
         if (time_step > 1.0d-20) then
@@ -1283,5 +1559,183 @@ contains
         random_val_out = dble(seed_io) * 0.4656613d-9 ! 元の正規化定数 (1.0 / 2147483648.0)
 
     end subroutine custom_random
+
+    !> パラメータ掃引による自由落下反発検証を実行するサブルーチン
+    subroutine parameter_sweep_validation
+        implicit none
+        integer :: sweep_idx
+        real(8) :: current_restitution_coeff, restitution_step
+        real(8) :: theoretical_height, actual_height, height_error_percent
+        
+        write(*,*) '================================='
+        write(*,*) 'パラメータ掃引による自由落下反発検証'
+        write(*,*) '================================='
+        write(*,*) '反発係数範囲: ', restitution_coeff_min, ' - ', restitution_coeff_max
+        write(*,*) '掃引回数: ', parameter_sweep_count
+        write(*,*) '================================='
+        
+        ! 結果出力ファイルを開く
+        open(unit=30, file='data/parameter_sweep_results.csv', status='replace', action='write')
+        write(30,*) 'Restitution_Coefficient,Theoretical_Height,Actual_Height,Error_Percent'
+        
+        ! 反発係数のステップサイズを計算
+        if (parameter_sweep_count > 1) then
+            restitution_step = (restitution_coeff_max - restitution_coeff_min) / real(parameter_sweep_count - 1, 8)
+        else
+            restitution_step = 0.0d0
+        end if
+        
+        do sweep_idx = 1, parameter_sweep_count
+            ! 現在の反発係数を設定
+            current_restitution_coeff = restitution_coeff_min + real(sweep_idx - 1, 8) * restitution_step
+            wall_validation_restitution_coeff = current_restitution_coeff
+            
+            write(*,*) ''
+            write(*,*) '--- 掃引 ', sweep_idx, '/', parameter_sweep_count, ' ---'
+                    write(*,*) '反発係数: ', current_restitution_coeff
+        
+        ! 単一の検証シミュレーションを実行
+        call single_validation_run(theoretical_height, actual_height, height_error_percent)
+        
+        ! デバッグ出力
+        write(*,*) '  -> 理論値:', theoretical_height, ', 実際値:', actual_height
+            
+            ! 結果をファイルに出力
+            write(30,'(F6.3,A,F10.6,A,F10.6,A,F8.4)') current_restitution_coeff, ',', &
+                theoretical_height, ',', actual_height, ',', height_error_percent
+            
+            write(*,*) '理論反発高さ: ', theoretical_height
+            write(*,*) '計算反発高さ: ', actual_height
+            write(*,*) '相対誤差: ', height_error_percent, '%'
+        end do
+        
+        close(30)
+        write(*,*) ''
+        write(*,*) '================================='
+        write(*,*) 'パラメータ掃引完了'
+        write(*,*) '結果は data/parameter_sweep_results.csv に保存されました'
+        write(*,*) '================================='
+    end subroutine parameter_sweep_validation
+
+    !> 単一の自由落下反発検証シミュレーションを実行するサブルーチン
+    subroutine single_validation_run(theoretical_height_out, actual_height_out, error_percent_out)
+        implicit none
+        real(8), intent(out) :: theoretical_height_out, actual_height_out, error_percent_out
+        
+        integer :: it_step, static_judge_flag
+        real(8) :: current_time, rmax_particle_radius
+        logical :: wall_collision_started_local, wall_collision_finished_local
+        logical :: particle_falling_local, particle_rising_local
+        real(8) :: initial_drop_height_local, pre_collision_velocity_local
+        real(8) :: max_rebound_height_local, theoretical_rebound_height_local
+        real(8) :: height_error  ! 変数定義を追加
+        integer :: i
+        
+        ! 初期化
+        call fposit_sub(rmax_particle_radius)
+        call inmat_sub
+        call init_sub
+        
+        ! 検証用変数の初期化
+        wall_collision_started_local = .false.
+        wall_collision_finished_local = .false.
+        particle_falling_local = .true.
+        particle_rising_local = .false.
+        initial_drop_height_local = wall_validation_drop_height
+        theoretical_rebound_height_local = wall_validation_restitution_coeff**2 * initial_drop_height_local
+        max_rebound_height_local = 0.0d0  ! 最高点の初期化
+        
+        ! 粒子-壁間検証モードの初期速度設定
+        x_vel(1) = 0.0d0
+        z_vel(1) = 0.0d0
+        rotation_vel(1) = 0.0d0
+        friction_coeff_particle = 0.0d0
+        friction_coeff_wall = 0.0d0
+        
+        current_time = 0.0d0
+        
+        ! シミュレーションループ
+        do it_step = 1, max_calculation_steps
+            current_time = current_time + time_step
+
+            call ncel_sub
+
+            do i = 1, num_particles
+                x_force_sum(i) = 0.0d0
+                z_force_sum(i) = 0.0d0
+                moment_sum(i) = 0.0d0
+            end do
+            
+            do i = 1, num_particles
+                call wcont_sub(i)
+                call pcont_sub(i, rmax_particle_radius)
+            end do
+
+            call nposit_sub(static_judge_flag)
+
+            ! 自由落下反発検証ロジック
+            if (.not. wall_collision_finished_local) then
+                if (particle_falling_local .and. z_coord(1) <= radius(1) + 1.0d-6) then
+                    ! 床に衝突
+                    wall_collision_started_local = .true.
+                    pre_collision_velocity_local = abs(z_vel(1))
+                    write(*,*) '床衝突検出: 時刻 = ', current_time
+                    write(*,*) '衝突直前速度: ', pre_collision_velocity_local
+                else if (wall_collision_started_local .and. particle_falling_local .and. z_coord(1) > radius(1) + 1.0d-3) then
+                    ! 床から離れた（反発開始）
+                    particle_falling_local = .false.
+                    particle_rising_local = .true.
+                    write(*,*) '床から離脱: 時刻 = ', current_time, ', 位置 = ', z_coord(1)
+                else if (particle_rising_local .and. z_vel(1) < 0.0d0) then
+                    ! 上昇から落下に転じた（最高点到達）
+                    particle_rising_local = .false.
+                    particle_falling_local = .true.
+                    max_rebound_height_local = z_coord(1)
+                    wall_collision_finished_local = .true.
+                    
+                    ! 理論値との比較
+                    height_error = abs(max_rebound_height_local - theoretical_rebound_height_local) / theoretical_rebound_height_local * 100.0d0
+                    
+                    write(*,*) '最高点検出: 時刻 = ', current_time, ', 位置 = ', z_coord(1), ', 速度 = ', z_vel(1)
+                    write(*,*) '================================='
+                    write(*,*) '自由落下反発検証結果'
+                    write(*,*) '================================='
+                    write(*,*) '初期落下高さ: ', initial_drop_height_local
+                    write(*,*) '反発係数: ', wall_validation_restitution_coeff
+                    write(*,*) '理論反発高さ: ', theoretical_rebound_height_local
+                    write(*,*) '計算反発高さ: ', max_rebound_height_local
+                    write(*,*) '相対誤差: ', height_error, '%'
+                    write(*,*) '================================='
+                    
+                    exit  ! シミュレーションループを抜ける
+                end if
+            end if
+
+            if (static_judge_flag == 1) then
+                exit
+            end if
+        end do
+        
+        ! 最高点検出が失敗した場合のフォールバック処理
+        if (.not. wall_collision_finished_local) then
+            if (particle_rising_local) then
+                ! 上昇中にシミュレーションが終了した場合、現在の高さを最高点とする
+                max_rebound_height_local = z_coord(1)
+            else
+                ! その他の場合、警告を出力
+                write(*,*) '警告: 最高点検出が失敗しました'
+                max_rebound_height_local = 0.0d0
+            end if
+        end if
+        
+        ! 結果を返す
+        theoretical_height_out = theoretical_rebound_height_local
+        actual_height_out = max_rebound_height_local
+        if (theoretical_height_out > 0.0d0) then
+            error_percent_out = abs(actual_height_out - theoretical_height_out) / theoretical_height_out * 100.0d0
+        else
+            error_percent_out = 0.0d0
+        end if
+    end subroutine single_validation_run
 
 end program two_dimensional_pem

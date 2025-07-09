@@ -95,10 +95,28 @@ def animate(frames_data, output_filename="pem_animation.gif"):
         print("アニメーションするデータがありません。")
         return
 
-    fig, ax = plt.subplots()
+    # フォント設定を無効化して英語のみ使用
+    import matplotlib
+    matplotlib.rcParams['font.family'] = 'DejaVu Sans'
+    
+    fig, ax = plt.subplots(figsize=(10, 8))
     
     # 描画範囲とアスペクト比は最初に一度だけ設定
     container_width = frames_data[0]['container_width']
+    
+    # 検証モード用の表示設定
+    is_validation_mode = False
+    is_slope_validation = False
+    if frames_data[0]['num_particles'] == 1 or frames_data[0]['num_particles'] == 2:
+        is_validation_mode = True
+        
+        # 斜面検証かどうかを判定（粒子のx方向移動量で判定）
+        if len(frames_data) > 10 and frames_data[0]['num_particles'] == 1:
+            initial_x = frames_data[0]['particles'][0]['x']
+            later_x = frames_data[min(10, len(frames_data)-1)]['particles'][0]['x']
+            x_movement = abs(later_x - initial_x)
+            if x_movement > 0.5:  # x方向に大きく移動している場合は斜面検証
+                is_slope_validation = True
     
     max_z_overall = 0.0
     if frames_data[0]['num_particles'] > 0 and frames_data[0]['particles']:
@@ -114,6 +132,10 @@ def animate(frames_data, output_filename="pem_animation.gif"):
                 
     if max_z_overall <= 0: # フォールバック
         max_z_overall = container_width * 0.5 if container_width > 0 else 1.0
+    
+    # 検証モード用の表示範囲調整
+    if is_validation_mode:
+        max_z_overall = max(max_z_overall, 12.0)  # 自由落下検証用に高さを確保
 
     # update_frameの外で固定のテキストオブジェクトを一度だけ作成
     time_text_obj = ax.text(0.05, 0.95, '', transform=ax.transAxes, ha="left", va="top", fontsize=10)
@@ -122,22 +144,33 @@ def animate(frames_data, output_filename="pem_animation.gif"):
     def update_frame(frame_idx):
         ax.cla() # 現在のアックスの内容をすべてクリア
 
+        # selected_framesから実際のフレームデータを取得
+        data = selected_frames[frame_idx]
+        
         # クリア後、軸の範囲やラベル、タイトルを再設定
-        current_container_width_for_xlim = frames_data[frame_idx]['container_width'] # 各フレームのコンテナ幅を使うこともできる
+        current_container_width_for_xlim = data['container_width']
         ax.set_xlim(-0.1 * current_container_width_for_xlim, 1.1 * current_container_width_for_xlim)
         ax.set_ylim(-0.1 * max_z_overall , 1.2 * max_z_overall)
         ax.set_aspect('equal', adjustable='box') 
         ax.set_xlabel("X coordinate")
         ax.set_ylabel("Z coordinate")
-        fig.suptitle(f"Particle Simulation (Frame {frame_idx+1}/{len(frames_data)})", fontsize=12)
-        
-        data = frames_data[frame_idx]
+        fig.suptitle(f"PEM Validation (Frame {frame_idx+1}/{len(selected_frames)})", fontsize=12)
         current_container_width = data['container_width']
 
         # 壁の描画
-        ax.plot([0, 0], [0, max_z_overall * 1.15], 'k-', lw=2) # 少し上まで線を引く
-        ax.plot([0, current_container_width], [0, 0], 'k-', lw=2)
-        ax.plot([current_container_width, current_container_width], [0, max_z_overall * 1.15], 'k-', lw=2) # 少し上まで線を引く
+        ax.plot([0, 0], [0, max_z_overall * 1.15], 'k-', lw=2) # 左壁
+        ax.plot([0, current_container_width], [0, 0], 'k-', lw=2) # 床
+        ax.plot([current_container_width, current_container_width], [0, max_z_overall * 1.15], 'k-', lw=2) # 右壁
+        
+        # 斜面壁の描画 (摩擦斜面検証用のみ)
+        if is_validation_mode and is_slope_validation and data['num_particles'] == 1:
+            # 30度の斜面を描画
+            slope_angle = 30.0 * np.pi / 180.0  # 30度をラジアンに変換
+            slope_x_end = min(current_container_width, max_z_overall * 1.15 / np.tan(slope_angle))
+            slope_z_end = slope_x_end * np.tan(slope_angle)
+            ax.plot([0, slope_x_end], [0, slope_z_end], 'r-', lw=2, alpha=0.7, label='Slope Wall')
+            if frame_idx == 0:  # 最初のフレームでのみ凡例を追加
+                ax.legend(loc='upper right')
 
         for p_data in data['particles']:
             circle = Circle((p_data['x'], p_data['z']), p_data['r'], facecolor='white', edgecolor='black', linewidth=1.5, alpha=0.9)
@@ -160,18 +193,27 @@ def animate(frames_data, output_filename="pem_animation.gif"):
         
         return [] 
 
-    ani = animation.FuncAnimation(fig, update_frame, frames=len(frames_data), blit=False, interval=100)
+    # フレーム数を制限してパフォーマンスを向上
+    max_frames = min(len(frames_data), 200)  # 最大200フレームに制限
+    frame_step = max(1, len(frames_data) // max_frames)
+    
+    selected_frames = frames_data[::frame_step]
+    
+    ani = animation.FuncAnimation(fig, update_frame, frames=len(selected_frames), blit=False, interval=150)
 
     try:
-        print(f"アニメーションを '{output_filename}' に保存中...")
-        writer = animation.PillowWriter(fps=15) # fpsを調整可能
-        ani.save(output_filename, writer=writer)
+        print(f"Animation saving to '{output_filename}' (frames: {len(selected_frames)})...")
+        writer = animation.PillowWriter(fps=10)  # fpsを下げてファイルサイズを削減
+        ani.save(output_filename, writer=writer, dpi=80)  # dpiを下げて軽量化
         
-        print("保存が完了しました。")
+        print("Animation saved successfully.")
+    except KeyboardInterrupt:
+        print("Animation creation was interrupted.")
+        return
     except Exception as e:
-        print(f"アニメーションの保存中にエラーが発生しました: {e}")
-        print("Pillow が正しくインストールされているか確認してください。")
-        print("例: pip install Pillow")
+        print(f"Error during animation creation: {e}")
+        print("Please check if Pillow is installed correctly.")
+        print("Example: pip install Pillow")
 
 
 if __name__ == "__main__":
