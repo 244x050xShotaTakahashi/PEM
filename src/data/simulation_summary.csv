@@ -1,0 +1,11 @@
+Parameter,Value
+Total_Steps,100001
+Total_Time_s,    1.000000
+Computation_Time_s,    0.941300
+Avg_Step_Time_ms,    0.009413
+Drop_Height_m,   10.000000
+Particle_Radius_m,    1.000000
+Particle_Mass_kg,10388.199708
+Restitution_Coefficient,    0.800000
+Max_Rebound_Height_m,    0.000000
+Theoretical_Rebound_Height_m,    6.400000
