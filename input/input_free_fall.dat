@@ -1,0 +1,28 @@
+# 改良版自由落下シミュレーション用入力ファイル
+# dem_calc.py準拠の詳細解析機能付き
+
+# 基本パラメータ
+TIME_STEP                     1.0e-5
+PARTICLE_DENSITY              1.0
+CONTAINER_WIDTH               300.0
+MAX_CALCULATION_STEPS         300000
+OUTPUT_INTERVAL               100
+
+# 自由落下モード設定
+DROP_HEIGHT                   100.0
+PARTICLE_X_POS                150.0
+PARTICLE_RADIUS               5.0
+RESTITUTION_COEFFICIENT       0.9
+
+# 材料物性値 (dem_calc.py準拠)
+YOUNG_MODULUS_PARTICLE        1.0e8
+YOUNG_MODULUS_WALL            1.0e8
+POISSON_RATIO_PARTICLE        0.3
+POISSON_RATIO_WALL            0.3
+FRICTION_COEFF_PARTICLE       0.0
+FRICTION_COEFF_WALL           0.0
+
+# 解析モード設定
+DETAILED_ANALYSIS             1
+ENERGY_ANALYSIS               1
+CONTACT_ANALYSIS              1 

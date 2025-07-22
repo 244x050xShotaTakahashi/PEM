@@ -9,6 +9,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
 import sys
+import matplotlib
+matplotlib.use('Agg')  # GUI not required
+plt.rcParams['font.family'] = 'DejaVu Sans'  # Use default font
 
 def analyze_benchmark_results(csv_file="benchmark_results.csv"):
     """
@@ -111,78 +114,87 @@ def analyze_benchmark_results(csv_file="benchmark_results.csv"):
 
 def create_benchmark_plots(merged, df_on, df_off):
     """
-    ベンチマーク結果のグラフを作成する
+    ベンチマーク結果のグラフを作成する（4つの個別のpngファイルに出力）
     """
     
-    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-    fig.suptitle('PEM Algorithm Benchmark Results', fontsize=16)
-    
     # 1. 実行時間の比較
-    ax1 = axes[0, 0]
-    ax1.plot(merged['Particles_ON'], merged['Time_seconds_ON'], 'o-', label='Cell Algorithm ON', linewidth=2)
-    ax1.plot(merged['Particles_OFF'], merged['Time_seconds_OFF'], 's-', label='Cell Algorithm OFF', linewidth=2)
-    ax1.set_xlabel('Number of Particles')
-    ax1.set_ylabel('Execution Time (seconds)')
-    ax1.set_title('Execution Time Comparison')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    ax1.set_yscale('log')
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(merged['Particles_ON'], merged['Time_seconds_ON'], 'o-', label='Cell Algorithm ON', linewidth=2, markersize=8)
+    ax.plot(merged['Particles_OFF'], merged['Time_seconds_OFF'], 's-', label='Cell Algorithm OFF', linewidth=2, markersize=8)
+    ax.set_xlabel('Number of Particles')
+    ax.set_ylabel('Execution Time (seconds)')
+    ax.set_title('Execution Time Comparison')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_yscale('log')
+    plt.tight_layout()
+    plt.savefig('benchmark/plots/execution_time_comparison.png', dpi=300, bbox_inches='tight')
+    plt.close()
     
     # 2. 加速比
-    ax2 = axes[0, 1]
-    ax2.plot(merged['Particles_ON'], merged['Speedup'], 'ro-', linewidth=2, markersize=8)
-    ax2.set_xlabel('Number of Particles')
-    ax2.set_ylabel('Speedup Ratio')
-    ax2.set_title('Speedup Ratio (OFF/ON)')
-    ax2.grid(True, alpha=0.3)
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(merged['Particles_ON'], merged['Speedup'], 'ro-', linewidth=2, markersize=8)
+    ax.set_xlabel('Number of Particles')
+    ax.set_ylabel('Speedup Ratio')
+    ax.set_title('Speedup Ratio (OFF/ON)')
+    ax.grid(True, alpha=0.3)
     
     # 理論線 (O(N^2) vs O(N))
     particles = merged['Particles_ON']
     theoretical_speedup = (particles / particles.min()) ** 1.5  # 近似的な理論値
-    ax2.plot(particles, theoretical_speedup, '--', alpha=0.7, label='Theoretical O(N^1.5)')
-    ax2.legend()
+    ax.plot(particles, theoretical_speedup, '--', alpha=0.7, label='Theoretical O(N^1.5)')
+    ax.legend()
+    plt.tight_layout()
+    plt.savefig('benchmark/plots/speedup_ratio.png', dpi=300, bbox_inches='tight')
+    plt.close()
     
     # 3. 1ステップあたりの時間
-    ax3 = axes[1, 0]
-    ax3.plot(merged['Particles_ON'], merged['Time_per_step_ON'], 'o-', label='Cell Algorithm ON', linewidth=2)
-    ax3.plot(merged['Particles_OFF'], merged['Time_per_step_OFF'], 's-', label='Cell Algorithm OFF', linewidth=2)
-    ax3.set_xlabel('Number of Particles')
-    ax3.set_ylabel('Time per Step (seconds)')
-    ax3.set_title('Time per Step Comparison')
-    ax3.legend()
-    ax3.grid(True, alpha=0.3)
-    ax3.set_yscale('log')
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(merged['Particles_ON'], merged['Time_per_step_ON'], 'o-', label='Cell Algorithm ON', linewidth=2, markersize=8)
+    ax.plot(merged['Particles_OFF'], merged['Time_per_step_OFF'], 's-', label='Cell Algorithm OFF', linewidth=2, markersize=8)
+    ax.set_xlabel('Number of Particles')
+    ax.set_ylabel('Time per Step (seconds)')
+    ax.set_title('Time per Step Comparison')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_yscale('log')
+    plt.tight_layout()
+    plt.savefig('benchmark/plots/time_per_step_comparison.png', dpi=300, bbox_inches='tight')
+    plt.close()
     
     # 4. 計算複雑度の分析
-    ax4 = axes[1, 1]
+    fig, ax = plt.subplots(figsize=(10, 6))
     particles = merged['Particles_ON']
     
     # 正規化された時間 (最小値で正規化)
     norm_time_on = merged['Time_per_step_ON'] / merged['Time_per_step_ON'].min()
     norm_time_off = merged['Time_per_step_OFF'] / merged['Time_per_step_OFF'].min()
     
-    ax4.loglog(particles, norm_time_on, 'o-', label='Cell Algorithm ON', linewidth=2)
-    ax4.loglog(particles, norm_time_off, 's-', label='Cell Algorithm OFF', linewidth=2)
+    ax.loglog(particles, norm_time_on, 'o-', label='Cell Algorithm ON', linewidth=2, markersize=8)
+    ax.loglog(particles, norm_time_off, 's-', label='Cell Algorithm OFF', linewidth=2, markersize=8)
     
     # 理論線
     n_min = particles.min()
     linear = particles / n_min
     quadratic = (particles / n_min) ** 2
     
-    ax4.loglog(particles, linear, '--', alpha=0.7, label='O(N) Linear')
-    ax4.loglog(particles, quadratic, '--', alpha=0.7, label='O(N²) Quadratic')
+    ax.loglog(particles, linear, '--', alpha=0.7, label='O(N) Linear')
+    ax.loglog(particles, quadratic, '--', alpha=0.7, label='O(N²) Quadratic')
     
-    ax4.set_xlabel('Number of Particles')
-    ax4.set_ylabel('Normalized Time per Step')
-    ax4.set_title('Computational Complexity Analysis')
-    ax4.legend()
-    ax4.grid(True, alpha=0.3)
-    
+    ax.set_xlabel('Number of Particles')
+    ax.set_ylabel('Normalized Time per Step')
+    ax.set_title('Computational Complexity Analysis')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig('benchmark_results.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig('benchmark/plots/computational_complexity.png', dpi=300, bbox_inches='tight')
+    plt.close()
     
-    print("\nグラフを保存しました: benchmark_results.png")
+    print("\nグラフを保存しました:")
+    print("- execution_time_comparison.png")
+    print("- speedup_ratio.png")
+    print("- time_per_step_comparison.png")
+    print("- computational_complexity.png")
 
 def print_statistics(merged):
     """

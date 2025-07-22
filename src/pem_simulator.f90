@@ -199,7 +199,7 @@ program two_dimensional_pem
     ! -----------------------------------------------
     if (validation_mode) then
         ! 粒子1に指定された速度、粒子2は静止
-        x_vel(1) = validation_particle1_vx
+        x_vel(1) = validation_particle1_vx 
         x_vel(2) = validation_particle2_vx
         z_vel(1) = 0.0d0
         z_vel(2) = 0.0d0
@@ -1000,7 +1000,7 @@ contains
             else if (wall_validation_mode) then
                 call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, wall_validation_restitution_coeff, wall_validation_restitution_coeff)
             else
-                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 0.5d0, 0.5d0)
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 0.8d0, 0.8d0)
             end if
         else                        ! 接触なし
             normal_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
@@ -1025,7 +1025,7 @@ contains
                 end if
                 call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, wall_validation_restitution_coeff, wall_validation_restitution_coeff)
             else
-                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 0.5d0, 0.5d0)
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 0.8d0, 0.8d0)
             end if
         else                        ! 接触なし
             normal_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
@@ -1046,7 +1046,7 @@ contains
             else if (wall_validation_mode) then
                 call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, wall_validation_restitution_coeff, wall_validation_restitution_coeff)
             else
-                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 0.5d0, 0.5d0)
+                call actf_sub(particle_idx, wall_partner_id, wall_contact_slot_idx, wall_angle_sin, wall_angle_cos, overlap_gap, 0.8d0, 0.8d0)
             end if
         else                                        ! 接触なし
             normal_force_contact(particle_idx, wall_contact_slot_idx) = 0.0d0
