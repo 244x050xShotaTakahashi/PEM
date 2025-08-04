@@ -1,0 +1,5 @@
+Parameter,Theoretical,Actual,Error_%
+Free_Fall_Time_s,    4.516008,    4.401660,  2.5320
+Impact_Velocity_m/s,   44.286906,   43.165539,  2.5320
+Rebound_Height_m,   81.000000,  121.801591, 50.3723
+Energy_Loss_J,97560.248722,************,214.7452

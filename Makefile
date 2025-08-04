@@ -3,8 +3,8 @@
 # コンパイラとフラグの設定
 FC = ifort
 FFLAGS = -O3 -r8 -traceback -g -warn all
-TARGET = pem_simulator_improved
-SOURCE = src/pem_simulator_improved.f90
+TARGET = pem_simulator_freefall
+SOURCE = src/pem_simulator_freefall.f90
 
 # デフォルトターゲット
 all: $(TARGET)

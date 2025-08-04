@@ -411,7 +411,7 @@ class FreeFallAnalyzer:
         particle_radius = 5.0  # 粒子半径（仮定）
         
         # プロット範囲の設定
-        x_margin = particle_radius * 2
+        x_margin = particle_radius * 10
         z_margin = particle_radius * 2
         ax.set_xlim(min(x_pos) - x_margin, max(x_pos) + x_margin)
         ax.set_ylim(min(z_pos) - z_margin, max(z_pos) + z_margin)

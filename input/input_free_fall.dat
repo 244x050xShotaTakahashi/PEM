@@ -5,7 +5,7 @@
 TIME_STEP                     1.0e-5
 PARTICLE_DENSITY              1.0
 CONTAINER_WIDTH               300.0
-MAX_CALCULATION_STEPS         300000
+MAX_CALCULATION_STEPS         1000000
 OUTPUT_INTERVAL               100
 
 # 自由落下モード設定

@@ -27,16 +27,16 @@ rm -f data/*.gif
 
 # Fortranプログラムのコンパイル
 echo "Fortranプログラムをコンパイル中..."
-if [ -f "Makefile_improved" ]; then
-    make -f Makefile_improved clean
-    make -f Makefile_improved all
+if [ -f "Makefile_freefall" ]; then
+    make -f Makefile_freefall clean
+    make -f Makefile_freefall all
 else
     # Makefileがない場合は直接コンパイル
-    gfortran -O3 -fdefault-real-8 -fbacktrace -g -Wall -o pem_simulator_improved pem_simulator_improved.f90
+    gfortran -O3 -fdefault-real-8 -fbacktrace -g -Wall -o pem_simulator_freefall pem_simulator_freefall.f90
 fi
 
 # コンパイルが成功したかチェック
-if [ ! -f "pem_simulator_improved" ]; then
+if [ ! -f "pem_simulator_freefall" ]; then
     echo "エラー: コンパイルに失敗しました"
     exit 1
 fi
@@ -54,7 +54,7 @@ echo ""
 echo "シミュレーションを開始します..."
 echo "========================================"
 
-./pem_simulator_improved
+./pem_simulator_freefall
 
 # 実行結果の確認
 if [ $? -eq 0 ]; then
