@@ -33,19 +33,19 @@ PEM/
 cd PEM
 
 # Fortranコンパイラを使用
-ifort pem_simulator.f90 -o pem_simulator
+ifort src/pem_simulator.f90 -o pem_simulator
 
 # または最適化オプション付き
-ifort -O3  pem_simulator.f90 -o pem_simulator 
+ifort -O3  src/pem_simulator.f90 -o pem_simulator 
 ```
 
 ### 実行
 ```bash
 # シミュレーション実行
-./src/pem_simulator 
+./pem_simulator 
 
 # animate_pem.pyを用いてアニメーション化
-python3 animate_pem.py
+python3 src/animate_pem.py
 ```
 
 ## ⚙️ シミュレーションパラメータ
