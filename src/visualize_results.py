@@ -23,7 +23,42 @@ from pathlib import Path
 from typing import Optional, Tuple, List
 
 # 日本語フォント設定
-plt.rcParams['font.family'] = 'DejaVu Sans'
+import matplotlib.font_manager as fm
+
+def setup_japanese_font():
+    """日本語フォントの設定"""
+    try:
+        # 利用可能なフォントを取得
+        font_list = [f.name for f in fm.fontManager.ttflist]
+        
+        # 日本語対応フォントを優先順位で検索
+        japanese_fonts = [
+            'Noto Sans CJK JP', 
+            'Noto Sans CJK JP Regular',
+            'Droid Sans Japanese',
+            'Noto Sans',
+            'Noto Sans Mono'
+        ]
+        
+        for font in japanese_fonts:
+            if font in font_list:
+                plt.rcParams['font.family'] = font
+                print(f"フォント設定: {font}")
+                return True
+        
+        # フォールバック
+        print("警告: 日本語対応フォントが見つかりません。英語表示になります。")
+        plt.rcParams['font.family'] = 'DejaVu Sans'
+        return False
+        
+    except Exception as e:
+        print(f"フォント設定エラー: {e}")
+        plt.rcParams['font.family'] = 'DejaVu Sans'
+        return False
+
+# フォント設定を実行
+setup_japanese_font()
+plt.rcParams['axes.unicode_minus'] = False  # マイナス記号の文字化け防止
 plt.rcParams['figure.figsize'] = (12, 8)
 plt.rcParams['font.size'] = 10
 
@@ -56,7 +91,9 @@ class FreeFallAnalyzer:
         try:
             # 状態ファイルの読み込み
             state_pattern = str(self.data_dir / 'state_step_*.csv')
-            self.state_files = sorted(glob.glob(state_pattern))
+            # ファイル名を数値順でソート（ステップ番号順）
+            self.state_files = sorted(glob.glob(state_pattern), 
+                                    key=lambda x: int(x.split('_')[-1].split('.')[0]))
             print(f"状態ファイル数: {len(self.state_files)}")
             
             # 詳細解析データの読み込み
@@ -341,8 +378,14 @@ class FreeFallAnalyzer:
         plt.show()
         print("接触解析図を保存しました: contact_analysis.png")
     
-    def create_animation(self, interval=50, save_gif=True):
-        """粒子の軌跡アニメーション作成"""
+    def create_animation(self, interval=50, save_gif=True, data_skip=10):
+        """粒子の軌跡アニメーション作成
+        
+        Args:
+            interval (int): アニメーションフレーム間隔 [ms]
+            save_gif (bool): GIFファイルとして保存するかどうか
+            data_skip (int): データの間引き間隔（10なら1/10に間引き）
+        """
         times, x_pos, z_pos, z_vel = self.extract_trajectory_data()
         
         if times is None or x_pos is None or z_pos is None or z_vel is None:
@@ -353,10 +396,18 @@ class FreeFallAnalyzer:
             print("アニメーション作成に必要なデータ点が不足しています")
             return
         
+        # データを間引いてアニメーション速度を向上
+        original_length = len(times)
+        times = times[::data_skip]
+        x_pos = x_pos[::data_skip]
+        z_pos = z_pos[::data_skip]
+        z_vel = z_vel[::data_skip]
+        
+        print(f"データ間引き: {original_length} → {len(times)} フレーム (1/{data_skip}に間引き)")
+        
         fig, ax = plt.subplots(figsize=(10, 8))
         
-        # 軌跡の設定
-        trail_length = min(50, len(z_pos) // 10)  # 軌跡の長さ
+        # 軌跡の設定（初期位置から現在位置までの全軌跡を表示）
         particle_radius = 5.0  # 粒子半径（仮定）
         
         # プロット範囲の設定
@@ -374,7 +425,10 @@ class FreeFallAnalyzer:
                                    color='blue', alpha=0.8)
         ax.add_patch(particle_circle)
         
-        trail_line, = ax.plot([], [], 'r-', alpha=0.5, linewidth=2, label='軌跡')
+        trail_line, = ax.plot([], [], 'r-', alpha=0.8, linewidth=2.5, label='軌跡')
+        # 初期位置をマーク
+        initial_marker = ax.plot(x_pos[0], z_pos[0], 'go', markersize=8, 
+                               label='初期位置', zorder=10)[0]
         velocity_text = ax.text(0.02, 0.98, '', transform=ax.transAxes, 
                                verticalalignment='top', fontsize=12,
                                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
@@ -393,9 +447,8 @@ class FreeFallAnalyzer:
             # 粒子位置の更新
             particle_circle.center = (x_pos[frame], z_pos[frame])
             
-            # 軌跡の更新
-            start_idx = max(0, frame - trail_length)
-            trail_line.set_data(x_pos[start_idx:frame+1], z_pos[start_idx:frame+1])
+            # 軌跡の更新（初期位置から現在位置まで全ての軌跡を表示）
+            trail_line.set_data(x_pos[0:frame+1], z_pos[0:frame+1])
             
             # 速度情報の更新
             velocity_text.set_text(f'時刻: {times[frame]:.3f} s\n'
