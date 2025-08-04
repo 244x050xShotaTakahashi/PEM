@@ -1,8 +1,8 @@
 Parameter,Value
 Total_Steps,1000001
 Total_Time_s,   10.000000
-Computation_Time_s,   13.488700
-Avg_Step_Time_ms,    0.013489
+Computation_Time_s,    9.727400
+Avg_Step_Time_ms,    0.009727
 Drop_Height_m,  100.000000
 Particle_Radius_m,    5.000000
 Particle_Mass_kg,  523.598776
