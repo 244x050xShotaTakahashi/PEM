@@ -98,20 +98,20 @@ class WallValidationAnalyzer:
         
         # 反発係数vs誤差のプロット
         ax1.plot(df['Restitution_Coefficient'], df['Error_Percent'], 'bo-', linewidth=2, markersize=8)
-        ax1.set_xlabel('反発係数', fontsize=12)
-        ax1.set_ylabel('相対誤差 (%)', fontsize=12)
-        ax1.set_title('反発係数vs相対誤差', fontsize=14)
+        ax1.set_xlabel('Restitution Coefficient', fontsize=12)
+        ax1.set_ylabel('Relative Error (%)', fontsize=12)
+        ax1.set_title('Restitution Coefficient vs Error', fontsize=14)
         ax1.grid(True, alpha=0.3)
         ax1.set_ylim(bottom=0)
         
         # 理論値vs計算値の比較
-        ax2.plot(df['Theoretical_Height'], df['Actual_Height'], 'ro', markersize=8, label='計算値')
+        ax2.plot(df['Theoretical_Height'], df['Actual_Height'], 'ro', markersize=8, label='Calculated')
         min_val = min(df['Theoretical_Height'].min(), df['Actual_Height'].min())
         max_val = max(df['Theoretical_Height'].max(), df['Actual_Height'].max())
-        ax2.plot([min_val, max_val], [min_val, max_val], 'k--', linewidth=2, label='理論値=計算値')
-        ax2.set_xlabel('理論反発高さ', fontsize=12)
-        ax2.set_ylabel('計算反発高さ', fontsize=12)
-        ax2.set_title('理論値vs計算値', fontsize=14)
+        ax2.plot([min_val, max_val], [min_val, max_val], 'k--', linewidth=2, label='Theoretical=Calculated')
+        ax2.set_xlabel('Theoretical Height', fontsize=12)
+        ax2.set_ylabel('Calculated Height', fontsize=12)
+        ax2.set_title('Theoretical vs Calculated', fontsize=14)
         ax2.legend()
         ax2.grid(True, alpha=0.3)
         ax2.axis('equal')
