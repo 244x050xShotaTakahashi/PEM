@@ -49,6 +49,8 @@ class WallValidationAnalyzer:
         sweep_file = self.data_dir / "parameter_sweep_results.csv"
         if sweep_file.exists():
             df = pd.read_csv(sweep_file)
+            # 列名の空白を除去
+            df.columns = df.columns.str.strip()
             
             # エラー統計の計算
             mean_error = df['Error_Percent'].mean()

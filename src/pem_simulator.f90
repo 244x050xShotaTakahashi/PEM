@@ -1587,7 +1587,7 @@ contains
         
         ! 結果出力ファイルを開く
         open(unit=30, file='data/parameter_sweep_results.csv', status='replace', action='write')
-        write(30,*) 'Restitution_Coefficient,Theoretical_Height,Actual_Height,Error_Percent'
+        write(30,'(A)') 'Restitution_Coefficient,Theoretical_Height,Actual_Height,Error_Percent'
         
         ! 反発係数のステップサイズを計算
         if (parameter_sweep_count > 1) then
