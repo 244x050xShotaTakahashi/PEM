@@ -3,8 +3,8 @@
 # コンパイラとフラグの設定
 FC = ifort
 FFLAGS = -O3 -r8 -traceback -g -warn all
-TARGET = pem_simulator_freefall
-SOURCE = src/pem_simulator_freefall.f90
+TARGET = pem_simulator
+SOURCE = src/pem_simulator.f90
 
 # デフォルトターゲット
 all: $(TARGET)
@@ -20,8 +20,8 @@ run: $(TARGET)
 # クリーンアップ
 clean:
 	rm -f $(TARGET) src/*.mod src/*.o *.mod *.o
-	rm -rf data/
-
+	rm -f data/state_step_*.csv
+	
 # データディレクトリの作成
 prepare:
 	mkdir -p data data/detailed data/analysis
