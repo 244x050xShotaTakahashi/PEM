@@ -176,6 +176,9 @@ program two_dimensional_pem
     real(8) :: theoretical_velocity, theoretical_position
     real(8) :: actual_velocity, actual_position
     real(8) :: velocity_error, position_error
+    
+    ! 検証レポート用変数
+    character(len=1000) :: results_summary
 
     ! 計算時間計測開始
     call system_clock(start_time, clock_rate)
@@ -377,7 +380,11 @@ program two_dimensional_pem
                 write(*,*) '理論反発高さ: ', theoretical_rebound_height
                 write(*,*) '計算反発高さ: ', max_rebound_height
                 write(*,*) '相対誤差: ', height_error, '%'
-                                    write(*,*) '================================='
+                write(*,*) '================================='
+                
+                ! 詳細な検証レポートの生成
+                call generate_wall_validation_report(wall_validation_type, results_summary)
+                write(*,*) trim(results_summary)
                     
                     exit  ! シミュレーションループを抜ける
             end if
@@ -415,6 +422,10 @@ program two_dimensional_pem
                 write(*,*) '計算位置: ', actual_position
                 write(*,*) '位置誤差: ', position_error, '%'
                 write(*,*) '================================='
+                
+                ! 詳細な検証レポートの生成
+                call generate_wall_validation_report(wall_validation_type, results_summary)
+                write(*,*) trim(results_summary)
                 
                 wall_collision_finished = .true.
             end if
@@ -1616,6 +1627,78 @@ contains
         write(*,*) '結果は data/parameter_sweep_results.csv に保存されました'
         write(*,*) '================================='
     end subroutine parameter_sweep_validation
+
+    !> 詳細な壁-粒子間検証レポートを生成するサブルーチン
+    subroutine generate_wall_validation_report(validation_type, results_summary)
+        implicit none
+        integer, intent(in) :: validation_type
+        character(len=1000), intent(out) :: results_summary
+        character(len=200) :: report_filename
+        integer :: unit_num = 31
+        
+        if (validation_type == 1) then
+            report_filename = 'data/wall_validation_freefall_report.txt'
+        else if (validation_type == 2) then
+            report_filename = 'data/wall_validation_slope_report.txt'
+        else
+            report_filename = 'data/wall_validation_general_report.txt'
+        end if
+        
+        open(unit=unit_num, file=report_filename, status='replace', action='write')
+        
+        write(unit_num, '(A)') '======================================================'
+        write(unit_num, '(A)') '粒子要素法(PEM) 壁-粒子間検証レポート'
+        write(unit_num, '(A)') '======================================================'
+        write(unit_num, '(A)') ''
+        write(unit_num, '(A,I0)') '検証タイプ: ', validation_type
+        if (validation_type == 1) then
+            write(unit_num, '(A)') '検証内容: 自由落下反発検証'
+        else if (validation_type == 2) then
+            write(unit_num, '(A)') '検証内容: 摩擦斜面検証'
+        end if
+        write(unit_num, '(A)') ''
+        
+        ! シミュレーションパラメータの出力
+        write(unit_num, '(A)') '--- シミュレーションパラメータ ---'
+        write(unit_num, '(A,ES12.5)') '時間刻み: ', time_step
+        write(unit_num, '(A,ES12.5)') '粒子ヤング率: ', young_modulus_particle
+        write(unit_num, '(A,ES12.5)') '壁ヤング率: ', young_modulus_wall
+        write(unit_num, '(A,F8.4)') '粒子ポアソン比: ', poisson_ratio_particle
+        write(unit_num, '(A,F8.4)') '壁ポアソン比: ', poisson_ratio_wall
+        write(unit_num, '(A,ES12.5)') '粒子密度: ', particle_density
+        write(unit_num, '(A,F8.4)') '摩擦係数(粒子): ', friction_coeff_particle
+        write(unit_num, '(A,F8.4)') '摩擦係数(壁): ', friction_coeff_wall
+        write(unit_num, '(A)') ''
+        
+        if (validation_type == 1) then
+            write(unit_num, '(A)') '--- 自由落下反発検証パラメータ ---'
+            write(unit_num, '(A,ES12.5)') '初期落下高さ: ', wall_validation_drop_height
+            write(unit_num, '(A,ES12.5)') '粒子半径: ', wall_validation_particle_radius
+            write(unit_num, '(A,F8.4)') '反発係数: ', wall_validation_restitution_coeff
+        else if (validation_type == 2) then
+            write(unit_num, '(A)') '--- 摩擦斜面検証パラメータ ---'
+            write(unit_num, '(A,F8.4)') '斜面角度(ラジアン): ', wall_validation_slope_angle
+            write(unit_num, '(A,F8.4)') '斜面角度(度): ', wall_validation_slope_angle * 180.0d0 / PI_VAL
+            write(unit_num, '(A,F8.4)') '斜面摩擦係数: ', wall_validation_slope_friction
+        end if
+        
+        write(unit_num, '(A)') ''
+        write(unit_num, '(A)') '--- 注意事項 ---'
+        write(unit_num, '(A)') '本検証は理論値との比較により、シミュレーションの精度を評価します。'
+        write(unit_num, '(A)') '時間刻みが適切でない場合、数値誤差が大きくなる可能性があります。'
+        write(unit_num, '(A)') '======================================================'
+        
+        close(unit_num)
+        
+        ! 結果サマリーの準備
+        if (validation_type == 1) then
+            write(results_summary, '(A)') '自由落下反発検証レポートを生成しました: ' // trim(report_filename)
+        else if (validation_type == 2) then
+            write(results_summary, '(A)') '摩擦斜面検証レポートを生成しました: ' // trim(report_filename)
+        else
+            write(results_summary, '(A)') '壁-粒子間検証レポートを生成しました: ' // trim(report_filename)
+        end if
+    end subroutine generate_wall_validation_report
 
     !> 単一の自由落下反発検証シミュレーションを実行するサブルーチン
     subroutine single_validation_run(theoretical_height_out, actual_height_out, error_percent_out)
